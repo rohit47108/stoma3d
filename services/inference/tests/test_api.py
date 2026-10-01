@@ -243,6 +243,7 @@ def test_health_and_errors_have_privacy_headers_and_request_ids() -> None:
         "retainsData": False,
         "deploymentMode": "development",
         "analysisReady": False,
+        "privacyReady": True,
         "productionReady": False,
         "responseSigningConfigured": False,
         "responseSigningRequired": False,
@@ -268,6 +269,17 @@ def test_health_and_errors_have_privacy_headers_and_request_ids() -> None:
     assert missing.json()["error"]["requestId"] == missing.headers["x-request-id"]
     assert missing.headers["x-request-id"] != "bad value"
     assert missing.headers["cache-control"] == "no-store"
+
+
+def test_health_reports_unavailable_privacy_check(monkeypatch) -> None:
+    from stoma3d_api import main
+
+    monkeypatch.setattr(main, "privacy_check_ready", lambda: False)
+    health = client.get("/healthz").json()
+    assert health["privacyReady"] is False
+    assert health["analysisReady"] is False
+    assert health["productionReady"] is False
+    assert "privacy_check_unavailable" in health["readinessReasons"]
 
 
 def test_model_card_keeps_all_research_release_gates_closed() -> None:

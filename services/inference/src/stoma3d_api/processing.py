@@ -63,11 +63,12 @@ from .release_manifest import RELEASE_RUNTIME, ReleaseRuntimeState
 MAX_IMAGE_BYTES = 1_750_000
 MAX_IMAGE_PIXELS = 20_000_000
 MAX_PROCESSING_EDGE = 2_048
+QUALITY_ANALYSIS_EDGE = 512
 SUPPORTED_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 SUPPORTED_PIL_FORMATS = {"JPEG", "PNG", "WEBP"}
 
 MODEL_VERSIONS = {
-    "quality": "opencv-quality-yunet-v3",
+    "quality": "opencv-quality-yunet-v4-512",
     "registration": "orb-homography-descriptor-normalization-v4",
 }
 MINIMUM_SEGMENTATION_ENSEMBLE_IOU = 0.50
@@ -236,6 +237,14 @@ def _detect_face(image: SanitizedImage) -> bool | None:
     return faces is not None and len(faces) > 0
 
 
+@lru_cache(maxsize=1)
+def privacy_check_ready() -> bool:
+    """Exercise the packaged detector on non-patient pixels before readiness."""
+    bgr = np.zeros((320, 320, 3), dtype=np.uint8)
+    probe = SanitizedImage(b"", bgr, bgr)
+    return _detect_face(probe) is not None
+
+
 def assess_quality(image: SanitizedImage) -> tuple[QualityResult, float]:
     """Return deterministic, normalized capture-quality signals.
 
@@ -244,9 +253,21 @@ def assess_quality(image: SanitizedImage) -> tuple[QualityResult, float]:
     is better).  The API README records these semantics for clients.
     """
 
-    gray = cv2.cvtColor(image.bgr, cv2.COLOR_BGR2GRAY)
-    hsv = cv2.cvtColor(image.bgr, cv2.COLOR_BGR2HSV)
-    height, width = gray.shape
+    height, width = image.bgr.shape[:2]
+    scale = min(1.0, QUALITY_ANALYSIS_EDGE / max(height, width))
+    # Focus must not depend on the phone's sensor resolution. Keep aspect
+    # ratio, downsample only, and use the same image for all quality metrics.
+    quality_bgr = (
+        image.bgr
+        if scale == 1.0
+        else cv2.resize(
+            image.bgr,
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+    )
+    gray = cv2.cvtColor(quality_bgr, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(quality_bgr, cv2.COLOR_BGR2HSV)
 
     laplacian_variance = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     blur_score = _clamp(1.0 - math.exp(-laplacian_variance / 180.0))

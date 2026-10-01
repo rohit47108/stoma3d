@@ -3,7 +3,7 @@
   "framework": "fastapi",
   "functions": {
     "vercel_entrypoint.py": {
-      "includeFiles": "{private-release/**,release/**}",
+      "includeFiles": "{private-release/**,release/**,src/stoma3d_api/assets/**}",
       "maxDuration": 60
     }
   }

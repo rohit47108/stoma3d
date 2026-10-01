@@ -48,6 +48,7 @@ from .processing import (
     compare_sanitized_images,
     failed_analysis,
     failed_comparison,
+    privacy_check_ready,
     sanitize_image,
 )
 from .release_manifest import RELEASE_RUNTIME
@@ -518,7 +519,8 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
 
 @app.get("/healthz")
 async def healthz() -> dict[str, object]:
-    analysis_ready = RELEASE_RUNTIME.analysis_ready
+    privacy_ready = privacy_check_ready()
+    analysis_ready = RELEASE_RUNTIME.analysis_ready and privacy_ready
     signing_configured = RESPONSE_SIGNER is not None
     production_ready = (
         SERVICE_CONFIGURATION.production
@@ -529,8 +531,10 @@ async def healthz() -> dict[str, object]:
     readiness_reasons: list[str] = []
     if not RELEASE_RUNTIME.manifest_loaded:
         readiness_reasons.extend(RELEASE_RUNTIME.load_reasons)
-    if not analysis_ready:
+    if not RELEASE_RUNTIME.analysis_ready:
         readiness_reasons.append("required_analysis_heads_unavailable")
+    if not privacy_ready:
+        readiness_reasons.append("privacy_check_unavailable")
     if not signing_configured:
         readiness_reasons.append("response_signing_not_configured")
     if DEMO_FIXTURES_ENABLED:
@@ -545,6 +549,7 @@ async def healthz() -> dict[str, object]:
         "retainsData": False,
         "deploymentMode": SERVICE_CONFIGURATION.deployment_mode.value,
         "analysisReady": analysis_ready,
+        "privacyReady": privacy_ready,
         "productionReady": production_ready,
         "responseSigningConfigured": signing_configured,
         "responseSigningRequired": SERVICE_CONFIGURATION.response_signing_required,

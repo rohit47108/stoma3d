@@ -4,7 +4,6 @@
 .venv/
 node_modules/
 apps/mobile/
-assets/
 design-system/
 docs/
 ml/

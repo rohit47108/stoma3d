@@ -76,7 +76,7 @@ def test_vercel_function_configuration_targets_the_fastapi_entrypoint() -> None:
     assert config["framework"] == "fastapi"
     assert config["functions"] == {
         "vercel_entrypoint.py": {
-            "includeFiles": "{private-release/**,release/**}",
+            "includeFiles": "{private-release/**,release/**,src/stoma3d_api/assets/**}",
             "maxDuration": 60,
         }
     }
@@ -95,6 +95,14 @@ def test_vercel_upload_excludes_development_only_files() -> None:
     assert {".pytest_cache/", ".vercel/", "**/__pycache__/", "tests/"} <= patterns
     assert "private-release/" not in patterns
     assert "release/" not in patterns
+
+
+def test_repository_upload_includes_shared_map_and_privacy_assets() -> None:
+    repository = Path(__file__).resolve().parents[3]
+    patterns = (repository / ".vercelignore").read_text(encoding="utf-8").splitlines()
+    assert "assets/" not in patterns
+    assert "/assets/" not in patterns
+    assert (repository / "assets/mouth/manifest.json").is_file()
 
 
 def test_vercel_entrypoint_accepts_public_api_prefix() -> None:
