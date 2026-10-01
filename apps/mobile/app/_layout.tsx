@@ -217,12 +217,11 @@ function RootLayoutContent() {
 
   if (!hydrated || consentBlocked) {
     return (
-      <View style={styles.guard}>
-        <StatusBar style="light" />
-        <Text style={styles.guardDisclaimer}>{DISCLAIMER}</Text>
-        <ActivityIndicator color="#FFFFFF" size="small" />
-        <Text style={styles.guardText}>
-          {hydrated ? "Opening consent..." : "Opening protected workspace..."}
+      <View style={[styles.guard, { backgroundColor: theme.background }]}>
+        <StatusBar style={theme.statusBarStyle} />
+        <ActivityIndicator color={theme.primary} size="small" />
+        <Text style={[styles.guardText, { color: theme.secondaryText }]}>
+          {hydrated ? "Opening your scan…" : "Opening Stoma3D…"}
         </Text>
       </View>
     );

@@ -11,7 +11,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { DISCLAIMER } from "@/constants";
 import { useAppTheme } from "@/theme";
 
 interface ScreenProps extends PropsWithChildren {
@@ -81,13 +80,6 @@ export function Screen({
       style={[styles.safe, { backgroundColor: theme.background }]}
       edges={["top", "bottom", "left", "right"]}
     >
-      <View style={[styles.disclaimer, { backgroundColor: theme.navy }]}>
-        <Text
-          style={[styles.disclaimerText, { fontSize: 12 * theme.fontScale }]}
-        >
-          {DISCLAIMER}
-        </Text>
-      </View>
       {scroll ? (
         <ScrollView
           contentContainerStyle={styles.scroll}
@@ -110,12 +102,6 @@ export function Screen({
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  disclaimer: {
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  disclaimerText: { color: "#FFFFFF", fontWeight: "700", letterSpacing: 0.15 },
   scroll: { flexGrow: 1, width: "100%" },
   content: {
     flex: 1,

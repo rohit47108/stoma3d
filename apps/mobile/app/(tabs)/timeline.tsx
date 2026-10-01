@@ -67,13 +67,13 @@ export default function TimelineRoute() {
     ) ?? trajectories[0];
 
   return (
-    <Screen title="Visual-change timeline" eyebrow="Longitudinal observations">
+    <Screen title="History">
       {captures.length === 0 ? (
         <Card>
           <EmptyState
             icon="analytics-outline"
-            title="No analyzed observations yet"
-            body="Capture an accepted region to begin a visual timeline. Comparisons never run until you confirm that two images show the same area."
+            title="Your scans will appear here"
+            body="Save a photo to start your history. You can compare the same area across later scans."
             action={
               <Button
                 label="Go to scan"

@@ -1,23 +1,21 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { router } from "expo-router";
-import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
   MOUTH_REGION_DETAILS,
   type CaptureAngle,
   type MouthRegion,
 } from "@stoma3d/contracts";
 
-import { OralObservationMap } from "@/components/OralObservationMap";
 import { Screen } from "@/components/Screen";
-import { Button, Card, EmptyState, SectionTitle } from "@/components/Ui";
+import { Button, EmptyState, SectionTitle } from "@/components/Ui";
 import {
   acceptedAngles,
-  acceptedRegions,
   detailedScanProgress,
   requiredAnglesForProtocol,
-  scanProgress,
 } from "@/lib/scanLogic";
+import { nextScanCapture, resumableSession } from "@/lib/usabilityFlow";
 import { useStoma3DStore } from "@/store/useStoma3DStore";
 import { useAppTheme } from "@/theme";
 
@@ -25,352 +23,231 @@ export default function ScanRoute() {
   const theme = useAppTheme();
   const sessions = useStoma3DStore((state) => state.sessions);
   const captures = useStoma3DStore((state) => state.captures);
+  const analyses = useStoma3DStore((state) => state.analyses);
   const activeSessionId = useStoma3DStore((state) => state.activeSessionId);
   const setActiveSession = useStoma3DStore((state) => state.setActiveSession);
-  const [selectedRegion, setSelectedRegion] = useState<MouthRegion | null>(
-    null,
-  );
-  const session = sessions.find((item) => item.id === activeSessionId) ?? null;
-  const progress = useMemo(
-    () => (activeSessionId ? scanProgress(captures, activeSessionId) : null),
-    [activeSessionId, captures],
-  );
-  const completed = useMemo(
-    () => (activeSessionId ? acceptedRegions(captures, activeSessionId) : []),
-    [activeSessionId, captures],
-  );
-
-  const detailProgress = useMemo(
-    () =>
-      activeSessionId
-        ? detailedScanProgress(
-            captures,
-            activeSessionId,
-            session?.protocol ?? "standard_eight_region",
-          )
-        : null,
-    [activeSessionId, captures, session?.protocol],
-  );
-  const openCapture = (region: MouthRegion, angle?: CaptureAngle) => {
-    setSelectedRegion(region);
-    router.push({
-      pathname: "/capture/[region]",
-      params: { region, ...(angle ? { angle } : {}) },
-    });
+  const [otherScansOpen, setOtherScansOpen] = useState(false);
+  const session =
+    sessions.find((item) => item.id === activeSessionId && !item.demo) ??
+    resumableSession(sessions, captures, null);
+  const openCapture = (region: MouthRegion, angle: CaptureAngle) => {
+    if (!session) return;
+    setActiveSession(session.id);
+    router.push({ pathname: "/capture/[region]", params: { region, angle } });
   };
-
-  if (!session || !progress) {
+  if (!session)
     return (
-      <Screen title="Structured mouth scan" eyebrow="Eight regions">
-        <Card accent="teal">
-          <EmptyState
-            icon="scan-circle-outline"
-            title="One accepted image per region"
-            body="Stoma3D guides each capture, rejects unusable images, and marks the scan complete only at 8 of 8."
-          />
-          <Button
-            label="Start a new scan"
-            icon="camera-outline"
-            onPress={() => router.push("/onboarding")}
-          />
-        </Card>
-        {sessions.length > 0 ? (
-          <SessionList
-            sessions={sessions}
-            captures={captures}
-            activeSessionId={activeSessionId}
-            onSelect={setActiveSession}
-          />
-        ) : null}
+      <Screen title="Scan">
+        <EmptyState
+          icon="scan-outline"
+          title="One region at a time"
+          body="Take or upload a photo of each mouth region. You can pause and return whenever you need."
+        />
+        <Button
+          label="Start scan"
+          icon="arrow-forward"
+          onPress={() => router.push("/onboarding")}
+        />
+        <Button
+          label="Explore the 3D map"
+          variant="ghost"
+          icon="cube-outline"
+          onPress={() => router.push("/(tabs)/map")}
+        />
       </Screen>
     );
-  }
-
-  const protocolComplete =
-    detailProgress !== null &&
-    detailProgress.completedViews === detailProgress.totalViews;
-  const selectedAcceptedAngles = selectedRegion
-    ? acceptedAngles(captures, session.id, selectedRegion)
-    : [];
-
-  return (
-    <Screen title="Structured mouth scan" eyebrow="Private session">
-      <Card accent={protocolComplete ? "teal" : "amber"}>
-        <View style={styles.progressHeading}>
-          <View>
-            <Text style={[styles.progressNumber, { color: theme.text }]}>
-              {detailProgress?.completedViews ?? progress.completed} of{" "}
-              {detailProgress?.totalViews ?? progress.total}
-            </Text>
-            <Text
-              style={[styles.progressLabel, { color: theme.secondaryText }]}
-            >
-              {session.protocol === "standard_eight_region"
-                ? "quality-accepted regions"
-                : "quality-accepted views"}
-            </Text>
-          </View>
-          <View
-            style={[
-              styles.progressBadge,
-              {
-                backgroundColor: protocolComplete
-                  ? theme.mint
-                  : theme.warningSurface,
-              },
-            ]}
-          >
-            <Ionicons
-              name={protocolComplete ? "checkmark-circle" : "hourglass-outline"}
-              color={protocolComplete ? theme.primary : theme.amber}
-              size={25}
-            />
-          </View>
-        </View>
-        <View style={[styles.track, { backgroundColor: theme.line }]}>
-          <View
-            style={[
-              styles.fill,
-              {
-                backgroundColor: theme.primary,
-                width: `${((detailProgress?.completedViews ?? progress.completed) / (detailProgress?.totalViews ?? progress.total)) * 100}%`,
-              },
-            ]}
-          />
-        </View>
-        <Text style={[styles.sessionLabel, { color: theme.secondaryText }]}>
-          {session.label} · {protocolLabel(session.protocol)}
-        </Text>
-      </Card>
-
-      <OralObservationMap
-        completedRegions={completed}
-        selectedRegion={selectedRegion}
-        onSelectRegion={setSelectedRegion}
-      />
-      {selectedRegion ? (
-        session.protocol === "detailed_multi_angle" ? (
-          <Card accent="teal">
-            <SectionTitle
-              title={`Views for ${MOUTH_REGION_DETAILS.find((item) => item.id === selectedRegion)?.shortLabel ?? selectedRegion}`}
-              subtitle="Capture each named angle. A check marks views already accepted."
-              icon="layers-outline"
-            />
-            {requiredAnglesForProtocol(session.protocol).map((angle) => (
-              <Button
-                key={angle}
-                label={`${selectedAcceptedAngles.includes(angle) ? "✓ " : ""}${angleLabel(angle)}`}
-                icon="camera-outline"
-                variant={
-                  selectedAcceptedAngles.includes(angle)
-                    ? "secondary"
-                    : "primary"
-                }
-                onPress={() => openCapture(selectedRegion, angle)}
-              />
-            ))}
-          </Card>
-        ) : (
-          <Button
-            label={`${session.protocol === "guided_video_sweep" ? "Record guided sweep" : "Capture"} · ${MOUTH_REGION_DETAILS.find((item) => item.id === selectedRegion)?.shortLabel ?? selectedRegion}`}
-            icon={
-              session.protocol === "guided_video_sweep"
-                ? "videocam-outline"
-                : "camera-outline"
-            }
-            onPress={() => openCapture(selectedRegion)}
-          />
-        )
-      ) : null}
-
-      <Card>
-        <SectionTitle
-          title="Capture path"
-          subtitle="Green check means quality accepted. On-device rejections never upload; service rejections are removed."
-          icon="git-branch-outline"
-        />
-        <View style={styles.regionList}>
-          {MOUTH_REGION_DETAILS.map((region, index) => {
-            const acceptedForRegion = acceptedAngles(
-              captures,
-              session.id,
-              region.id,
-            );
-            const requiredForRegion = requiredAnglesForProtocol(
-              session.protocol,
-            );
-            const done = requiredForRegion.every((angle) =>
-              acceptedForRegion.includes(angle),
-            );
-            return (
-              <Pressable
-                key={region.id}
-                accessibilityRole="button"
-                accessibilityLabel={`${region.label}. ${done ? "Accepted" : "Not captured"}`}
-                onPress={() => {
-                  setSelectedRegion(region.id);
-                  if (session.protocol !== "detailed_multi_angle") {
-                    openCapture(region.id);
-                  }
-                }}
-                style={({ pressed }) => [
-                  styles.regionRow,
-                  { borderBottomColor: theme.border },
-                  pressed && styles.regionRowPressed,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.step,
-                    {
-                      backgroundColor: done ? theme.primary : theme.background,
-                      borderColor: done ? theme.primary : theme.border,
-                    },
-                  ]}
-                >
-                  {done ? (
-                    <Ionicons name="checkmark" size={16} color="#FFFFFF" />
-                  ) : (
-                    <Text
-                      style={{ color: theme.secondaryText, fontWeight: "800" }}
-                    >
-                      {index + 1}
-                    </Text>
-                  )}
-                </View>
-                <View style={styles.regionCopy}>
-                  <Text style={[styles.regionTitle, { color: theme.text }]}>
-                    {region.label}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.regionInstruction,
-                      { color: theme.secondaryText },
-                    ]}
-                  >
-                    {region.captureInstruction}
-                    {session.protocol === "standard_eight_region"
-                      ? ""
-                      : ` · ${acceptedForRegion.length} of ${requiredForRegion.length} views`}
-                  </Text>
-                </View>
-                <Ionicons
-                  name="chevron-forward"
-                  color={theme.secondaryText}
-                  size={19}
-                />
-              </Pressable>
-            );
-          })}
-        </View>
-      </Card>
-      {protocolComplete ? (
-        <Button
-          label="Generate local clinician report"
-          icon="document-text-outline"
-          onPress={() => router.push("/report")}
-        />
-      ) : null}
-      <Button
-        label="Start another scan"
-        icon="add-circle-outline"
-        variant="ghost"
-        onPress={() => router.push("/onboarding")}
-      />
-      {sessions.length > 1 ? (
-        <SessionList
-          sessions={sessions}
-          captures={captures}
-          activeSessionId={activeSessionId}
-          onSelect={setActiveSession}
-        />
-      ) : null}
-    </Screen>
+  const progress = detailedScanProgress(captures, session.id, session.protocol);
+  const next = nextScanCapture(session, captures);
+  const nextDetail = MOUTH_REGION_DETAILS.find(
+    (detail) => detail.id === next?.region,
   );
-}
-
-function protocolLabel(
-  protocol: ReturnType<
-    typeof useStoma3DStore.getState
-  >["sessions"][number]["protocol"],
-): string {
-  if (protocol === "detailed_multi_angle") return "Detailed photos";
-  if (protocol === "guided_video_sweep") return "Guided sweeps";
-  return "Standard photos";
-}
-
-function angleLabel(angle: CaptureAngle): string {
-  if (angle === "straight") return "Straight view";
-  if (angle === "left_oblique") return "Left view";
-  if (angle === "right_oblique") return "Right view";
-  if (angle === "superior") return "Upper view";
-  if (angle === "inferior") return "Lower view";
-  return "Primary view";
-}
-
-function SessionList({
-  sessions,
-  captures,
-  activeSessionId,
-  onSelect,
-}: {
-  sessions: ReturnType<typeof useStoma3DStore.getState>["sessions"];
-  captures: ReturnType<typeof useStoma3DStore.getState>["captures"];
-  activeSessionId: string | null;
-  onSelect: (sessionId: string) => void;
-}) {
-  const theme = useAppTheme();
-  const realSessions = sessions.filter((session) => !session.demo);
-  if (realSessions.length === 0) return null;
+  const complete = next === null;
   return (
-    <Card>
-      <SectionTitle
-        title="Saved scan sessions"
-        subtitle="Choose an earlier session to resume it or open its report."
-        icon="folder-open-outline"
+    <Screen title={complete ? "Scan complete" : "Your scan"}>
+      <View style={styles.progressHeading}>
+        <Text style={[styles.progressText, { color: theme.text }]}>
+          {progress.completeRegions} of 8 regions
+        </Text>
+        <Text style={[styles.date, { color: theme.secondaryText }]}>
+          {new Date(session.createdAt).toLocaleDateString()}
+        </Text>
+      </View>
+      <View
+        accessible
+        accessibilityRole="progressbar"
+        accessibilityLabel="Scan progress"
+        accessibilityValue={{ min: 0, max: 8, now: progress.completeRegions }}
+        style={[styles.track, { backgroundColor: theme.line }]}
+      >
+        <View
+          style={[
+            styles.fill,
+            {
+              width: `${(progress.completeRegions / 8) * 100}%`,
+              backgroundColor: theme.primary,
+            },
+          ]}
+        />
+      </View>
+      {session.protocol !== "standard_eight_region" ? (
+        <Text style={[styles.body, { color: theme.secondaryText }]}>
+          Saved{" "}
+          {session.protocol === "guided_video_sweep"
+            ? "video-sweep"
+            : "multi-angle"}{" "}
+          scan · {progress.completedViews} of {progress.totalViews} views
+        </Text>
+      ) : null}
+      {next && nextDetail ? (
+        <View style={styles.next}>
+          <Text style={[styles.nextLabel, { color: theme.secondaryText }]}>
+            Up next
+          </Text>
+          <Text style={[styles.nextTitle, { color: theme.text }]}>
+            {nextDetail.label}
+          </Text>
+          <Text style={[styles.body, { color: theme.secondaryText }]}>
+            {nextDetail.captureInstruction}
+          </Text>
+          <Button
+            label="Continue scan"
+            icon="camera-outline"
+            onPress={() => openCapture(next.region, next.angle)}
+          />
+        </View>
+      ) : (
+        <>
+          <Text style={[styles.body, { color: theme.secondaryText }]}>
+            All eight regions are saved. Review your observations or make a
+            report.
+          </Text>
+          <Button
+            label="Create report"
+            icon="document-text-outline"
+            onPress={() => {
+              setActiveSession(session.id);
+              router.push("/report");
+            }}
+          />
+        </>
+      )}
+      <Button
+        label="View on 3D map"
+        icon="cube-outline"
+        variant="ghost"
+        onPress={() => router.push("/(tabs)/map")}
       />
-      {realSessions
-        .slice()
-        .reverse()
-        .map((item) => {
-          const detail = detailedScanProgress(captures, item.id, item.protocol);
-          const active = item.id === activeSessionId;
+      <SectionTitle title="Mouth regions" />
+      <View>
+        {MOUTH_REGION_DETAILS.map((region, index) => {
+          const angles = acceptedAngles(captures, session.id, region.id);
+          const required = requiredAnglesForProtocol(session.protocol);
+          const done = required.every((angle) => angles.includes(angle));
+          const latest = captures
+            .filter(
+              (item) =>
+                item.sessionId === session.id &&
+                item.region === region.id &&
+                item.quality.accepted,
+            )
+            .at(-1);
+          const resultReady =
+            latest && analyses[latest.id]?.status === "complete";
+          const angle =
+            required.find((item) => !angles.includes(item)) ??
+            required[0] ??
+            "primary";
           return (
             <Pressable
-              key={item.id}
+              key={region.id}
               accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              accessibilityLabel={`${new Date(item.createdAt).toLocaleString()}, ${detail.completedViews} of ${detail.totalViews} accepted views${active ? ", active session" : ""}`}
-              onPress={() => onSelect(item.id)}
+              accessibilityLabel={`${region.label}, ${done ? "saved" : "not captured"}${resultReady ? ", open result" : ""}`}
+              onPress={() =>
+                resultReady
+                  ? router.push({
+                      pathname: "/result/[captureId]",
+                      params: { captureId: latest.id },
+                    })
+                  : openCapture(region.id, angle)
+              }
               style={({ pressed }) => [
-                styles.sessionRow,
-                { borderColor: active ? theme.primary : theme.border },
-                pressed && styles.sessionPressed,
+                styles.regionRow,
+                { borderBottomColor: theme.border },
+                pressed && styles.pressed,
               ]}
             >
-              <View style={styles.sessionCopy}>
-                <Text style={[styles.sessionTitle, { color: theme.text }]}>
-                  {new Date(item.createdAt).toLocaleString()}
+              <View
+                style={[
+                  styles.step,
+                  { backgroundColor: done ? theme.mint : theme.surface },
+                ]}
+              >
+                {done ? (
+                  <Ionicons name="checkmark" color={theme.primary} size={19} />
+                ) : (
+                  <Text
+                    style={[styles.stepText, { color: theme.secondaryText }]}
+                  >
+                    {index + 1}
+                  </Text>
+                )}
+              </View>
+              <View style={styles.regionCopy}>
+                <Text style={[styles.regionTitle, { color: theme.text }]}>
+                  {region.shortLabel}
                 </Text>
                 <Text
-                  style={[styles.sessionMeta, { color: theme.secondaryText }]}
+                  style={[styles.regionStatus, { color: theme.secondaryText }]}
                 >
-                  {protocolLabel(item.protocol)} · {detail.completedViews} of{" "}
-                  {detail.totalViews} views
-                  {detail.completedViews === detail.totalViews
-                    ? " · report ready"
+                  {done
+                    ? resultReady
+                      ? "Result ready"
+                      : "Photo saved"
+                    : "Not captured"}
+                  {session.protocol !== "standard_eight_region"
+                    ? ` · ${angles.length}/${required.length} views`
                     : ""}
                 </Text>
               </View>
               <Ionicons
-                name={active ? "checkmark-circle" : "chevron-forward"}
-                color={active ? theme.primary : theme.secondaryText}
-                size={21}
+                name="chevron-forward"
+                color={theme.secondaryText}
+                size={19}
               />
             </Pressable>
           );
         })}
-    </Card>
+      </View>
+      <Button
+        label="Start a new scan"
+        variant="ghost"
+        icon="add-outline"
+        onPress={() => router.push("/onboarding")}
+      />
+      {sessions.filter((item) => !item.demo).length > 1 ? (
+        <>
+          <Button
+            label={otherScansOpen ? "Hide saved scans" : "Choose a saved scan"}
+            variant="ghost"
+            onPress={() => setOtherScansOpen((value) => !value)}
+          />
+          {otherScansOpen
+            ? sessions
+                .filter((item) => !item.demo)
+                .slice()
+                .reverse()
+                .map((item) => (
+                  <Button
+                    key={item.id}
+                    label={`${new Date(item.createdAt).toLocaleString()}${item.id === session.id ? " · Current" : ""}`}
+                    variant="secondary"
+                    onPress={() => setActiveSession(item.id)}
+                  />
+                ))
+            : null}
+        </>
+      ) : null}
+    </Screen>
   );
 }
 
@@ -379,56 +256,35 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
   },
-  progressNumber: {
-    fontSize: 27,
-    fontWeight: "900",
-    fontVariant: ["tabular-nums"],
-  },
-  progressLabel: { fontSize: 13 },
-  progressBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  track: { height: 10, borderRadius: 999, overflow: "hidden" },
-  fill: { height: "100%", borderRadius: 999 },
-  sessionLabel: { fontSize: 12, fontWeight: "700" },
-  regionList: { gap: 0 },
+  progressText: { fontSize: 18, fontWeight: "700" },
+  date: { fontSize: 13 },
+  track: { height: 6, borderRadius: 3, overflow: "hidden" },
+  fill: { height: "100%" },
+  body: { fontSize: 15, lineHeight: 23 },
+  next: { gap: 12, paddingVertical: 12 },
+  nextLabel: { fontSize: 13 },
+  nextTitle: { fontSize: 24, fontWeight: "700", letterSpacing: -0.4 },
   regionRow: {
-    minHeight: 76,
+    minHeight: 72,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 10,
+    paddingVertical: 12,
   },
   step: {
-    width: 32,
-    height: 32,
-    borderRadius: 11,
-    borderWidth: 1,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
-  regionCopy: { flex: 1, gap: 3 },
-  regionTitle: { fontSize: 14, fontWeight: "800" },
-  regionInstruction: { fontSize: 11, lineHeight: 15 },
-  regionRowPressed: { opacity: 0.8, transform: [{ scale: 0.99 }] },
-  sessionRow: {
-    minHeight: 60,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  sessionPressed: { opacity: 0.82, transform: [{ scale: 0.99 }] },
-  sessionCopy: { flex: 1, gap: 2 },
-  sessionTitle: { fontSize: 14, fontWeight: "800" },
-  sessionMeta: { fontSize: 12 },
+  stepText: { fontSize: 14, fontWeight: "700" },
+  regionCopy: { flex: 1, gap: 4 },
+  regionTitle: { fontSize: 15, fontWeight: "700" },
+  regionStatus: { fontSize: 12 },
+  pressed: { opacity: 0.75 },
 });

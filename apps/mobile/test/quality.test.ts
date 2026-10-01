@@ -4,6 +4,78 @@ import { TRANSPORT_IMAGE_BYTE_LIMIT } from "../src/constants";
 import { evaluateImageTelemetry } from "../src/lib/quality";
 
 describe("capture quality gate", () => {
+  it("uses sensor stability as advice, not a photo rejection", () => {
+    expect(
+      evaluateImageTelemetry({
+        edgeStrength: 0.2,
+        focusVariance: 0.02,
+        meanLuminance: 0.55,
+        highlightFraction: 0.01,
+        obstructionEstimate: 0.02,
+        faceDetected: false,
+        stable: false,
+      }).accepted,
+    ).toBe(true);
+  });
+
+  it("does not describe unavailable local measurements as blur", () => {
+    const result = evaluateImageTelemetry(
+      {
+        edgeStrength: 0,
+        meanLuminance: 0,
+        highlightFraction: 0,
+        obstructionEstimate: 0,
+        faceDetected: false,
+        stable: true,
+        measurementStatus: "unavailable",
+      },
+      "advisory",
+    );
+    expect(result.accepted).toBe(true);
+    expect(result.reasons).toEqual([]);
+  });
+
+  it("lets the server decide on measured photo quality", () => {
+    const result = evaluateImageTelemetry(
+      {
+        edgeStrength: 0,
+        focusVariance: 0,
+        meanLuminance: 0.1,
+        highlightFraction: 0,
+        obstructionEstimate: 0.2,
+        faceDetected: false,
+        stable: true,
+        width: 320,
+        height: 240,
+      },
+      "advisory",
+    );
+    expect(result.accepted).toBe(true);
+  });
+
+  it("uses the standardized server-policy cutoff when saving a retry draft", () => {
+    const standardized = {
+      edgeStrength: 0.05,
+      focusVariance: 0.0001,
+      meanLuminance: 0.55,
+      wellExposedFraction: 0.9,
+      highlightFraction: 0.02,
+      obstructionEstimate: 0.02,
+      faceDetected: false,
+      stable: false,
+      width: 640,
+      height: 480,
+      measurementStatus: "measured" as const,
+    };
+    expect(evaluateImageTelemetry(standardized).accepted).toBe(false);
+    expect(evaluateImageTelemetry(standardized, "advisory").accepted).toBe(
+      true,
+    );
+    expect(
+      evaluateImageTelemetry({ ...standardized, focusVariance: 0.002 })
+        .accepted,
+    ).toBe(true);
+  });
   it("accepts a stable, visible, evenly lit frame", () => {
     const result = evaluateImageTelemetry({
       edgeStrength: 0.2,

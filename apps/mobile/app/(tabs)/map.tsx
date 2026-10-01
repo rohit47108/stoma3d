@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MOUTH_REGION_DETAILS, type MouthRegion } from "@stoma3d/contracts";
@@ -42,6 +42,11 @@ export default function MapRoute() {
   const pins = useStoma3DStore((state) => state.pins);
   const activeSessionId = useStoma3DStore((state) => state.activeSessionId);
   const [selected, setSelected] = useState<MouthRegion | null>(null);
+  const { region } = useLocalSearchParams<{ region?: string }>();
+  useEffect(() => {
+    const matched = MOUTH_REGION_DETAILS.find((detail) => detail.id === region);
+    if (matched) setSelected(matched.id);
+  }, [region]);
   const [replayIndex, setReplayIndex] = useState(0);
   const [replaying, setReplaying] = useState(false);
 
@@ -117,10 +122,9 @@ export default function MapRoute() {
   };
 
   return (
-    <Screen title="Oral observation map" eyebrow="Your saved observations">
+    <Screen title="3D Map">
       <Text style={[styles.intro, { color: theme.secondaryText }]}>
-        See which named regions you captured, where you confirmed observation
-        links, and how that record changed over time.
+        Tap a region to explore your photos and observations.
       </Text>
 
       {frames.length > 1 ? (
@@ -235,14 +239,14 @@ export default function MapRoute() {
         <Card>
           <EmptyState
             icon="map-outline"
-            title="Your observation surface is ready"
-            body="Complete an accepted live capture to add coverage. Synthetic examples never personalize this map."
+            title="Explore your mouth map"
+            body="Your photos and confirmed observations will appear here as you scan."
             action={
               <Button
-                label="Start a structured scan"
+                label="Start scan"
                 icon="scan-outline"
                 variant="secondary"
-                onPress={() => router.push("/(tabs)/scan")}
+                onPress={() => router.push("/onboarding")}
               />
             }
           />
@@ -251,10 +255,10 @@ export default function MapRoute() {
 
       <Card accent={regionPins.length ? "amber" : "teal"}>
         <SectionTitle
-          title={detail?.label ?? "Choose a named region"}
+          title={detail?.label ?? "Choose a region"}
           subtitle={
             detail?.captureInstruction ??
-            "Select the 3D surface or accessible region list to inspect coverage and confirmed observations."
+            "Tap the map or choose a region below."
           }
           icon="location-outline"
         />

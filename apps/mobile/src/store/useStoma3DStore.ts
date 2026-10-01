@@ -14,12 +14,16 @@ import {
   assertLiveResultOrigin,
 } from "@/lib/liveInputPolicy";
 import { isChronologicalComparison } from "@/lib/longitudinalPolicy";
+import { captureDraftSchema, type CaptureDraft } from "@/lib/captureDrafts";
 import { cancelAllStoma3DReminders } from "@/lib/notifications";
 import { pinsAfterConfirmedComparison } from "@/lib/observationPins";
 import { comparisonsWithoutCaptureIds } from "@/lib/scanLogic";
 import {
   deleteAllLocalDataAndRotateKeys,
   loadPersistedState,
+  loadCaptureDrafts,
+  storeCaptureDraft,
+  deleteStoredCaptureDraft,
   queuePersistedState,
 } from "@/lib/storage";
 import {
@@ -37,6 +41,10 @@ import type {
 } from "@/types";
 
 interface Stoma3DState extends PersistedAppState {
+  /** Retry photos are local-only and never count toward scan completeness. */
+  captureDrafts: CaptureDraft[];
+  saveCaptureDraft: (draft: CaptureDraft) => Promise<void>;
+  removeCaptureDraft: (id: string) => Promise<void>;
   hydrated: boolean;
   storageError: string | null;
   hydrate: () => Promise<void>;
@@ -111,6 +119,16 @@ function persistedSnapshot(state: Stoma3DState): PersistedAppState {
     reports: state.reports,
     activeSessionId: state.activeSessionId,
   };
+}
+
+function protectedUris(state: Stoma3DState): Set<string> {
+  return new Set([
+    ...state.captures.flatMap((capture) =>
+      capture.encryptedUri ? [capture.encryptedUri] : [],
+    ),
+    ...state.captureDrafts.map((draft) => draft.encryptedUri),
+    ...state.reports.map((report) => report.encryptedUri),
+  ]);
 }
 
 function persist(
@@ -282,6 +300,7 @@ function assertPersistedReferences(state: PersistedAppState): void {
 
 export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
   ...initialPersistedState(),
+  captureDrafts: [],
   hydrated: false,
   storageError: null,
 
@@ -290,12 +309,26 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
     try {
       const loaded = await loadPersistedState();
       const persisted = loaded ? withoutDemoData(loaded) : null;
+      const captureDrafts = await loadCaptureDrafts();
+      const sessionIds = new Set(
+        persisted?.sessions.map((session) => session.id) ?? [],
+      );
+      const validDrafts = captureDrafts.filter((draft) =>
+        sessionIds.has(draft.sessionId),
+      );
+      for (const draft of captureDrafts) {
+        if (!sessionIds.has(draft.sessionId)) {
+          await deleteStoredCaptureDraft(draft.id);
+          await removeProtectedFile(draft.encryptedUri);
+        }
+      }
       if (persisted) {
         assertPersistedReferences(persisted);
         try {
           await removeUnreferencedProtectedFiles([
             ...persisted.captures.map((capture) => capture.encryptedUri),
             ...persisted.reports.map((report) => report.encryptedUri),
+            ...validDrafts.map((draft) => draft.encryptedUri),
           ]);
         } catch {
           console.warn("[STOMA3D_ORPHAN_CLEANUP_FAILED]");
@@ -304,6 +337,7 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
       set({
         ...(persisted ?? initialPersistedState()),
         pins: normalizePersistedPins(persisted?.pins ?? []),
+        captureDrafts: validDrafts,
         hydrated: true,
         storageError: null,
       });
@@ -317,6 +351,49 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         storageError:
           "The protected local workspace could not be opened or validated. Stoma3D has not replaced it with an empty workspace.",
       });
+    }
+  },
+
+  saveCaptureDraft: async (value) => {
+    const draft = captureDraftSchema.parse(value);
+    if (
+      !get().consentedAt ||
+      !get().sessions.some(
+        (session) => session.id === draft.sessionId && !session.demo,
+      )
+    ) {
+      throw new Error("Start a scan before saving a photo for retry.");
+    }
+    const previous = get().captureDrafts.filter(
+      (item) =>
+        item.id === draft.id ||
+        (item.sessionId === draft.sessionId &&
+          item.region === draft.region &&
+          item.angle === draft.angle),
+    );
+    const captureDrafts = await storeCaptureDraft(draft);
+    set({ captureDrafts });
+    const retained = new Set([
+      ...captureDrafts.map((item) => item.encryptedUri),
+      ...get().captures.map((item) => item.encryptedUri),
+    ]);
+    for (const item of previous) {
+      if (!retained.has(item.encryptedUri))
+        await removeProtectedFile(item.encryptedUri);
+    }
+  },
+
+  removeCaptureDraft: async (id) => {
+    const draft = get().captureDrafts.find((item) => item.id === id);
+    const captureDrafts = await deleteStoredCaptureDraft(id);
+    set({ captureDrafts });
+    if (
+      draft &&
+      !get().captures.some(
+        (capture) => capture.encryptedUri === draft.encryptedUri,
+      )
+    ) {
+      await removeProtectedFile(draft.encryptedUri);
     }
   },
 
@@ -535,21 +612,30 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
       await queuePersistedState(persistedSnapshot(get()));
     } catch {
       set(stateBeforeCommit);
-      await Promise.all(
-        entries.map(({ capture }) => removeProtectedFile(capture.encryptedUri)),
+      const retainedUris = protectedUris(get());
+      const cleanup = await Promise.allSettled(
+        entries
+          .filter(
+            ({ capture }) =>
+              capture.encryptedUri && !retainedUris.has(capture.encryptedUri),
+          )
+          .map(({ capture }) => removeProtectedFile(capture.encryptedUri)),
       );
+      if (cleanup.some((result) => result.status === "rejected")) {
+        console.warn("[STOMA3D_UNSAVED_CAPTURE_CLEANUP_FAILED]");
+      }
       throw new Error(
         "The protected capture set was not saved. The previous views are unchanged.",
       );
     }
-    const cleanupResults = await Promise.allSettled([
-      ...supersededCaptures.map((item) =>
-        removeProtectedFile(item.encryptedUri),
-      ),
-      ...invalidatedReports.map((report) =>
-        removeProtectedFile(report.encryptedUri),
-      ),
-    ]);
+    const retainedUris = protectedUris(get());
+    const obsoleteUris = [
+      ...supersededCaptures.map((item) => item.encryptedUri),
+      ...invalidatedReports.map((report) => report.encryptedUri),
+    ].filter((uri): uri is string => !!uri && !retainedUris.has(uri));
+    const cleanupResults = await Promise.allSettled(
+      [...new Set(obsoleteUris)].map((uri) => removeProtectedFile(uri)),
+    );
     if (cleanupResults.some((result) => result.status === "rejected")) {
       console.warn("[STOMA3D_SUPERSEDED_FILE_CLEANUP_FAILED]");
     }
@@ -574,11 +660,74 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         "The updated analysis identity does not match this capture.",
       );
     }
+    const previousAnalysis = stateBeforeCommit.analyses[captureId];
+    const maskChanged =
+      JSON.stringify(previousAnalysis?.candidateMask) !==
+      JSON.stringify(analysis.candidateMask);
+    const descriptorsChanged =
+      JSON.stringify(previousAnalysis?.descriptors) !==
+      JSON.stringify(analysis.descriptors);
+    const observationChanged = maskChanged || descriptorsChanged;
+    const analysisChanged =
+      JSON.stringify(previousAnalysis) !== JSON.stringify(analysis);
+    const invalidatedReports = analysisChanged
+      ? stateBeforeCommit.reports.filter(
+          (report) => report.sessionId === capture.sessionId,
+        )
+      : [];
+    const pins = observationChanged
+      ? stateBeforeCommit.pins.flatMap((pin) => {
+          if (!pin.captureIds.includes(captureId)) return [pin];
+          const { comparisonStatus, ...confirmedLocation } = pin;
+          if (!maskChanged) {
+            return [
+              { ...confirmedLocation, status: "review_unavailable" as const },
+            ];
+          }
+          // A changed candidate requires a new confirmation. Keep any other
+          // confirmed observations, but do not reuse the changed mask's UV.
+          const captureIds = pin.captureIds.filter((id) => id !== captureId);
+          const remainingCaptures = stateBeforeCommit.captures
+            .filter(
+              (item) =>
+                captureIds.includes(item.id) &&
+                stateBeforeCommit.analyses[item.id]?.candidateMask,
+            )
+            .sort((left, right) =>
+              left.capturedAt.localeCompare(right.capturedAt),
+            );
+          const seed = remainingCaptures[0];
+          const mask = seed
+            ? stateBeforeCommit.analyses[seed.id]?.candidateMask
+            : null;
+          if (!seed || !mask) return [];
+          const [x, y, width, height] = mask.boundingBox;
+          return [
+            {
+              ...confirmedLocation,
+              captureIds: remainingCaptures.map((item) => item.id),
+              uvX: Math.min(1, Math.max(0, x + width / 2)),
+              uvY: Math.min(1, Math.max(0, y + height / 2)),
+              firstObservedAt: seed.capturedAt,
+              status: "review_unavailable" as const,
+            },
+          ];
+        })
+      : stateBeforeCommit.pins;
     set((state) => ({
       captures: state.captures.map((item) =>
         item.id === captureId ? { ...item, quality: analysis.quality } : item,
       ),
       analyses: { ...state.analyses, [captureId]: analysis },
+      pins,
+      comparisons: observationChanged
+        ? comparisonsWithoutCaptureIds(state.comparisons, [captureId])
+        : state.comparisons,
+      reports: analysisChanged
+        ? state.reports.filter(
+            (report) => report.sessionId !== capture.sessionId,
+          )
+        : state.reports,
       storageError: null,
     }));
     try {
@@ -588,6 +737,15 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
       throw new Error(
         "The new analysis response could not be saved. The previous result is unchanged.",
       );
+    }
+    const retainedUris = protectedUris(get());
+    const cleanup = await Promise.allSettled(
+      invalidatedReports
+        .filter((report) => !retainedUris.has(report.encryptedUri))
+        .map((report) => removeProtectedFile(report.encryptedUri)),
+    );
+    if (cleanup.some((result) => result.status === "rejected")) {
+      console.warn("[STOMA3D_STALE_REPORT_CLEANUP_FAILED]");
     }
   },
 
@@ -745,6 +903,7 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         capture.encryptedUri ? [capture.encryptedUri] : [],
       ),
       ...state.reports.map((report) => report.encryptedUri),
+      ...stateBeforeCommit.captureDrafts.map((draft) => draft.encryptedUri),
     ]);
     const removedUris = [
       ...stateBeforeCommit.captures.flatMap((capture) =>
@@ -783,6 +942,7 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
     await deleteAllLocalDataAndRotateKeys();
     set({
       ...initialPersistedState(),
+      captureDrafts: [],
       hydrated: true,
       storageError: null,
     });

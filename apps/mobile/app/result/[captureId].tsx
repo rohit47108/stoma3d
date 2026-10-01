@@ -12,6 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { MOUTH_REGION_DETAILS } from "@stoma3d/contracts";
 
+import { DISCLAIMER } from "@/constants";
 import { MaskOverlay } from "@/components/MaskOverlay";
 import { Screen } from "@/components/Screen";
 import { Button, Card, MetricBar, SectionTitle } from "@/components/Ui";
@@ -20,11 +21,15 @@ import {
   ADDITIONAL_ANALYSIS_TITLE,
   isReleasedModelOutput,
 } from "@/lib/analysisPresentation";
-import { captureStorageRejectionReasons } from "@/lib/analysisPolicy";
+import {
+  captureAnalysisRetryDisposition,
+  captureStorageRejectionReasons,
+} from "@/lib/analysisPolicy";
 import { evaluateBundledGuidance } from "@/lib/guidanceRules";
 import { scheduleObservationReminder } from "@/lib/notifications";
 import { reminderSuggestion } from "@/lib/reminderPolicy";
 import { analysisStatusTitle, humanizeResultReason } from "@/lib/resultCopy";
+import { nextScanCapture } from "@/lib/usabilityFlow";
 import { decryptToTemporaryFile, removeTemporaryFile } from "@/lib/secureFiles";
 import { useStoma3DStore } from "@/store/useStoma3DStore";
 import { useAppTheme } from "@/theme";
@@ -54,14 +59,17 @@ export default function ResultRoute() {
   const discardCapture = useStoma3DStore((state) => state.discardCapture);
   const setActiveSession = useStoma3DStore((state) => state.setActiveSession);
   const sessions = useStoma3DStore((state) => state.sessions);
+  const captures = useStoma3DStore((state) => state.captures);
   const comparisons = useStoma3DStore((state) => state.comparisons);
   const currentProfile = useStoma3DStore((state) => state.profile);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewEpoch, setPreviewEpoch] = useState(0);
   const [researchOpen, setResearchOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [showMask, setShowMask] = useState(true);
   const [openExplanationStep, setOpenExplanationStep] = useState<string | null>(
-    "quality",
+    null,
   );
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -157,6 +165,8 @@ export default function ResultRoute() {
     MOUTH_REGION_DETAILS.find((item) => item.id === capture.region)?.label ??
     capture.region;
   const complete = analysis?.status === "complete";
+  const session = sessions.find((item) => item.id === capture.sessionId);
+  const next = session ? nextScanCapture(session, captures) : null;
   const unavailable = !analysis || analysis.status === "failed";
   const statusTitle = analysisStatusTitle(
     analysis?.status,
@@ -283,11 +293,20 @@ export default function ResultRoute() {
             }
           : {}),
       });
+      const disposition = captureAnalysisRetryDisposition(
+        nextAnalysis,
+        capture.region,
+      );
+      if (disposition === "preserve") {
+        throw new Error(
+          "Analysis could not be refreshed. Your saved photo and previous result are unchanged. Try again.",
+        );
+      }
       const rejectionReasons = captureStorageRejectionReasons(
         nextAnalysis,
         capture.region,
       );
-      if (rejectionReasons.length > 0) {
+      if (disposition === "reject") {
         await discardCapture(capture.id);
         setActiveSession(capture.sessionId);
         Alert.alert(
@@ -323,33 +342,19 @@ export default function ResultRoute() {
 
   return (
     <Screen
-      title="Explainable result"
+      title="Your result"
       eyebrow={label}
       action={
         <Button label="Back" variant="ghost" onPress={() => router.back()} />
       }
     >
-      <Card
-        accent={
-          complete && analysis?.candidateMask
-            ? "teal"
-            : complete
-              ? "amber"
-              : unavailable
-                ? "coral"
-                : "amber"
-        }
-      >
+      <View>
         <SectionTitle
           title={statusTitle}
-          subtitle={`${capture.inputOrigin === "bundled_demo" ? "Bundled synthetic input" : "Live capture"} · ${analysisOriginCopy(analysis?.analysisOrigin)}`}
+          subtitle={`${capture.inputOrigin === "bundled_demo" ? "Bundled synthetic input" : capture.captureSource === "photo_library" ? "Uploaded photo" : "Camera photo"} · ${new Date(capture.capturedAt).toLocaleDateString()}`}
           icon={statusIcon}
         />
-        <Text style={[styles.provenance, { color: theme.secondaryText }]}>
-          Input provenance and analysis provenance are recorded separately. A
-          live failure never receives a fixture result.
-        </Text>
-      </Card>
+      </View>
       {!complete &&
       analysis?.anatomyPrediction.supported &&
       analysis.anatomyPrediction.selectedRegionMatches ? (
@@ -366,7 +371,18 @@ export default function ResultRoute() {
         </Card>
       ) : null}
       {analysis?.candidateMask ? (
-        <MaskOverlay imageUri={previewUri} mask={analysis.candidateMask} />
+        <>
+          <MaskOverlay
+            imageUri={previewUri}
+            mask={analysis.candidateMask}
+            showMask={showMask}
+          />
+          <Button
+            label={showMask ? "Hide outline" : "Show outline"}
+            variant="ghost"
+            onPress={() => setShowMask((value) => !value)}
+          />
+        </>
       ) : previewUri ? (
         <Image
           accessible
@@ -403,22 +419,20 @@ export default function ResultRoute() {
       {complete && analysis && !analysis.candidateMask ? (
         <Card accent="amber">
           <SectionTitle
-            title="This is not an all-clear"
-            subtitle="The released abnormal-area model completed this image but did not return a thresholded candidate outline."
+            title="No candidate outline found"
+            subtitle="The photo was analyzed. No area met the model’s outline threshold."
             icon="information-circle-outline"
           />
           <Text style={[styles.limitation, { color: theme.secondaryText }]}>
-            An absent outline does not prove that the tissue is healthy or that
-            no condition is present. Keep the image for professional discussion
-            if the area persists, changes, or worries you.
+            If an area persists, changes, or worries you, show the photo to a
+            dental professional.
           </Text>
         </Card>
       ) : null}
       {!complete ? (
         <Card accent={unavailable ? "coral" : "amber"}>
           <SectionTitle
-            title="Why no completed result is shown"
-            subtitle="The saved image and the analysis state are kept separate."
+            title="Analysis needs another try"
             icon="information-circle-outline"
           />
           {statusReasons.length ? (
@@ -438,7 +452,7 @@ export default function ResultRoute() {
           {canRetry ? (
             <>
               <Button
-                label="Retry analysis of this saved image"
+                label="Retry analysis"
                 icon="refresh-outline"
                 variant="secondary"
                 loading={retrying}
@@ -488,7 +502,7 @@ export default function ResultRoute() {
           ) : null}
         </Card>
       ) : null}
-      {analysis?.candidateMask ? (
+      {complete && analysis?.candidateMask ? (
         <Card accent={pinConfirmed ? "teal" : "amber"}>
           <SectionTitle
             title={
@@ -496,18 +510,16 @@ export default function ResultRoute() {
                 ? "Observation pin confirmed"
                 : "Confirm map location"
             }
-            subtitle="Stoma3D never links or re-identifies observations automatically."
+            subtitle="Confirm this area to add it to your map."
             icon={pinConfirmed ? "location" : "location-outline"}
           />
           {pinConfirmed ? (
             <Text style={[styles.limitation, { color: theme.secondaryText }]}>
-              This single capture is pinned to its named mesh and UV location.
-              Later observations remain separate unless you explicitly confirm a
-              comparison.
+              This observation is saved on your map.
             </Text>
           ) : (
             <Button
-              label="Confirm this observation pin"
+              label="Add observation to map"
               icon="location-outline"
               variant="secondary"
               onPress={() => confirmObservationPin(capture.id)}
@@ -515,7 +527,7 @@ export default function ResultRoute() {
           )}
         </Card>
       ) : null}
-      {analysis?.candidateMask ? (
+      {detailsOpen && analysis?.candidateMask ? (
         <Card>
           <SectionTitle
             title="Observation identity card"
@@ -564,7 +576,7 @@ export default function ResultRoute() {
         <Card>
           <SectionTitle
             title="Visible characteristics"
-            subtitle="Image-normalized and approximate; not millimeters."
+            subtitle="Approximate measurements from this photo."
             icon="options-outline"
           />
           <View style={styles.grid}>
@@ -587,265 +599,304 @@ export default function ResultRoute() {
           </View>
         </Card>
       ) : null}
-      {capture.calibrationRequested ? (
-        <Card
-          accent={
-            capture.calibration?.status === "valid"
-              ? "teal"
-              : capture.calibration?.status === "invalid"
-                ? "amber"
-                : undefined
-          }
-        >
-          <SectionTitle
-            title={
-              capture.calibration?.status === "valid"
-                ? "Physical scale verified"
-                : capture.calibration?.status === "invalid"
-                  ? "Physical scale could not be verified"
-                  : "Physical scale check pending"
-            }
-            subtitle="Millimeter values are calibrated estimates, not clinical measurements."
-            icon="resize-outline"
-          />
-          {capture.calibration?.status === "valid" ? (
-            <View style={styles.grid}>
-              <Descriptor
-                label="Estimated width"
-                value={`${capture.calibration.estimatedWidthMm?.toFixed(1) ?? "—"} mm`}
-              />
-              <Descriptor
-                label="Estimated height"
-                value={`${capture.calibration.estimatedHeightMm?.toFixed(1) ?? "—"} mm`}
-              />
-              <Descriptor
-                label="Estimated area"
-                value={`${capture.calibration.estimatedAreaMm2?.toFixed(1) ?? "—"} mm²`}
-              />
-              <Descriptor
-                label="Scale confidence"
-                value={`${Math.round((capture.calibration.confidence ?? 0) * 100)}%`}
-              />
-            </View>
-          ) : (
-            <Text style={[styles.limitation, { color: theme.secondaryText }]}>
-              {capture.calibration?.gateReasons.length
-                ? capture.calibration.gateReasons
-                    .map(humanizeResultReason)
-                    .join(" ")
-                : "No millimeter value is stored until the versioned marker, same-plane placement, and candidate-boundary checks all pass."}
-            </Text>
-          )}
-        </Card>
-      ) : null}
-      {complete && analysis ? (
+      <Button
+        label={detailsOpen ? "Hide details" : "Result details and follow-up"}
+        variant="ghost"
+        accessibilityState={{ expanded: detailsOpen }}
+        onPress={() => setDetailsOpen((value) => !value)}
+      />
+      {detailsOpen ? (
         <>
-          <Card>
-            <SectionTitle
-              title="Why this result appears"
-              subtitle="Open each step to see exactly what evidence was used."
-              icon="git-branch-outline"
-            />
-            {explanationSteps.map((step, index) => (
-              <ExplanationStep
-                key={step.id}
-                index={index + 1}
-                title={step.title}
-                summary={step.summary}
-                detail={step.detail}
-                expanded={openExplanationStep === step.id}
-                onPress={() =>
-                  setOpenExplanationStep((current) =>
-                    current === step.id ? null : step.id,
-                  )
+          <Text style={[styles.provenance, { color: theme.secondaryText }]}>
+            {analysisOriginCopy(analysis?.analysisOrigin)} · Capture{" "}
+            {capture.id}
+            {analysis
+              ? ` · ${Object.entries(analysis.modelVersions)
+                  .map(([name, version]) => `${name}: ${version}`)
+                  .join(", ")}`
+              : ""}
+          </Text>
+          {capture.calibrationRequested ? (
+            <Card
+              accent={
+                capture.calibration?.status === "valid"
+                  ? "teal"
+                  : capture.calibration?.status === "invalid"
+                    ? "amber"
+                    : undefined
+              }
+            >
+              <SectionTitle
+                title={
+                  capture.calibration?.status === "valid"
+                    ? "Physical scale verified"
+                    : capture.calibration?.status === "invalid"
+                      ? "Physical scale could not be verified"
+                      : "Physical scale check pending"
                 }
+                subtitle="Millimeter values are calibrated estimates, not clinical measurements."
+                icon="resize-outline"
               />
-            ))}
+              {capture.calibration?.status === "valid" ? (
+                <View style={styles.grid}>
+                  <Descriptor
+                    label="Estimated width"
+                    value={`${capture.calibration.estimatedWidthMm?.toFixed(1) ?? "—"} mm`}
+                  />
+                  <Descriptor
+                    label="Estimated height"
+                    value={`${capture.calibration.estimatedHeightMm?.toFixed(1) ?? "—"} mm`}
+                  />
+                  <Descriptor
+                    label="Estimated area"
+                    value={`${capture.calibration.estimatedAreaMm2?.toFixed(1) ?? "—"} mm²`}
+                  />
+                  <Descriptor
+                    label="Scale confidence"
+                    value={`${Math.round((capture.calibration.confidence ?? 0) * 100)}%`}
+                  />
+                </View>
+              ) : (
+                <Text
+                  style={[styles.limitation, { color: theme.secondaryText }]}
+                >
+                  {capture.calibration?.gateReasons.length
+                    ? capture.calibration.gateReasons
+                        .map(humanizeResultReason)
+                        .join(" ")
+                    : "No millimeter value is stored until the versioned marker, same-plane placement, and candidate-boundary checks all pass."}
+                </Text>
+              )}
+            </Card>
+          ) : null}
+          {complete && analysis ? (
+            <>
+              <Card>
+                <SectionTitle
+                  title="Why this result appears"
+                  subtitle="Open each step to see exactly what evidence was used."
+                  icon="git-branch-outline"
+                />
+                {explanationSteps.map((step, index) => (
+                  <ExplanationStep
+                    key={step.id}
+                    index={index + 1}
+                    title={step.title}
+                    summary={step.summary}
+                    detail={step.detail}
+                    expanded={openExplanationStep === step.id}
+                    onPress={() =>
+                      setOpenExplanationStep((current) =>
+                        current === step.id ? null : step.id,
+                      )
+                    }
+                  />
+                ))}
+              </Card>
+              <Card>
+                <SectionTitle
+                  title="Confidence constellation"
+                  subtitle="Several factors are shown instead of one unexplained score."
+                  icon="analytics-outline"
+                />
+                <ConfidenceFactor
+                  label="Image quality"
+                  value={analysis.uncertainty.imageQualityConfidence}
+                />
+                <ConfidenceFactor
+                  label="Candidate visibility"
+                  value={null}
+                  unavailableReason="No separate candidate-visibility score has passed a release gate."
+                />
+                <ConfidenceFactor
+                  label="Model agreement"
+                  value={analysis.uncertainty.modelAgreement}
+                  unavailableReason="No independent model ensemble has passed a release gate."
+                />
+                <ConfidenceFactor
+                  label="Follow-up alignment"
+                  value={
+                    relatedComparison?.userConfirmedMatch &&
+                    relatedComparison.comparable
+                      ? relatedComparison.registrationConfidence
+                      : null
+                  }
+                  unavailableReason="No user-confirmed comparable follow-up is linked to this observation."
+                />
+                <ConfidenceFactor
+                  label="Symptom completeness"
+                  value={symptomCompleteness}
+                  unavailableReason="No saved symptom intake is linked to this scan."
+                />
+                <ConfidenceFactor
+                  label="Dataset similarity"
+                  value={analysis.uncertainty.datasetSimilarity}
+                  unavailableReason="No released dataset-similarity model is installed."
+                />
+                {analysis.uncertainty.limitations.map((limitation) => (
+                  <Text
+                    key={limitation}
+                    style={[styles.limitation, { color: theme.secondaryText }]}
+                  >
+                    • {limitation}
+                  </Text>
+                ))}
+              </Card>
+            </>
+          ) : null}
+          {complete &&
+          analysis?.appearanceOutput?.enabled &&
+          analysis.appearanceOutput.gatePassed ? (
+            <Card>
+              <SectionTitle
+                title="Appearance descriptor"
+                subtitle="Pixel pattern only; it does not identify a condition."
+                icon="color-palette-outline"
+              />
+              <Text style={[styles.appearance, { color: theme.text }]}>
+                {analysis.appearanceOutput.topLabel?.replaceAll("-", " ") ??
+                  "Unsupported"}
+              </Text>
+              <Text style={[styles.limitation, { color: theme.secondaryText }]}>
+                {analysis.appearanceOutput.limitation}
+              </Text>
+            </Card>
+          ) : null}
+          {complete &&
+          isReleasedModelOutput(analysis?.diseaseResearchOutput) ? (
+            <Card accent="amber">
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  researchOpen
+                    ? `Hide ${ADDITIONAL_ANALYSIS_TITLE.toLowerCase()}`
+                    : `Show ${ADDITIONAL_ANALYSIS_TITLE.toLowerCase()}`
+                }
+                accessibilityState={{ expanded: researchOpen }}
+                onPress={() => setResearchOpen((value) => !value)}
+                style={({ pressed }) => [
+                  styles.expand,
+                  pressed && styles.expandPressed,
+                ]}
+              >
+                <SectionTitle
+                  title={ADDITIONAL_ANALYSIS_TITLE}
+                  subtitle="Additional context with its confidence and model version."
+                  icon="flask-outline"
+                />
+                <Ionicons
+                  name={researchOpen ? "chevron-up" : "chevron-down"}
+                  color={theme.secondaryText}
+                  size={20}
+                />
+              </Pressable>
+              {researchOpen ? (
+                <Text
+                  style={[styles.limitation, { color: theme.secondaryText }]}
+                >
+                  {`${analysis.diseaseResearchOutput.topLabel?.replaceAll("_", " ") ?? "No label"} · ${analysis.diseaseResearchOutput.limitation}`}
+                </Text>
+              ) : null}
+            </Card>
+          ) : null}
+          <Card accent="amber">
+            <SectionTitle
+              title={
+                guidance.enabled
+                  ? guidance.reviewPriority === "professional_review_suggested"
+                    ? "Professional review suggested"
+                    : "Clinician-reviewed guidance"
+                  : "When to seek advice"
+              }
+              icon="information-circle-outline"
+            />
+            {guidance.enabled ? (
+              <Text style={[styles.limitation, { color: theme.text }]}>
+                {guidance.statusMessage}
+              </Text>
+            ) : null}
+            <Text style={[styles.limitation, { color: theme.secondaryText }]}>
+              {guidance.message}
+            </Text>
           </Card>
           <Card>
             <SectionTitle
-              title="Confidence constellation"
-              subtitle="Several factors are shown instead of one unexplained score."
-              icon="analytics-outline"
+              title={reminder.title}
+              subtitle={reminder.description}
+              icon="notifications-outline"
             />
-            <ConfidenceFactor
-              label="Image quality"
-              value={analysis.uncertainty.imageQualityConfidence}
+            <Button
+              label={`Remind me in ${reminder.delayDays === 1 ? "1 day" : "7 days"}`}
+              icon="alarm-outline"
+              variant="secondary"
+              loading={reminderBusy}
+              loadingLabel="Scheduling reminder..."
+              onPress={() => {
+                setReminderBusy(true);
+                setReminderError(null);
+                setReminderNotice(null);
+                void scheduleObservationReminder({
+                  captureId: capture.id,
+                  suggestion: reminder,
+                })
+                  .then(({ scheduledFor }) => {
+                    setReminderNotice(
+                      `Reminder scheduled for ${scheduledFor.toLocaleString()}.`,
+                    );
+                  })
+                  .catch((error: unknown) => {
+                    setReminderError(
+                      error instanceof Error
+                        ? error.message
+                        : "The reminder could not be scheduled.",
+                    );
+                  })
+                  .finally(() => setReminderBusy(false));
+              }}
             />
-            <ConfidenceFactor
-              label="Candidate visibility"
-              value={null}
-              unavailableReason="No separate candidate-visibility score has passed a release gate."
-            />
-            <ConfidenceFactor
-              label="Model agreement"
-              value={analysis.uncertainty.modelAgreement}
-              unavailableReason="No independent model ensemble has passed a release gate."
-            />
-            <ConfidenceFactor
-              label="Follow-up alignment"
-              value={
-                relatedComparison?.userConfirmedMatch &&
-                relatedComparison.comparable
-                  ? relatedComparison.registrationConfidence
-                  : null
-              }
-              unavailableReason="No user-confirmed comparable follow-up is linked to this observation."
-            />
-            <ConfidenceFactor
-              label="Symptom completeness"
-              value={symptomCompleteness}
-              unavailableReason="No saved symptom intake is linked to this scan."
-            />
-            <ConfidenceFactor
-              label="Dataset similarity"
-              value={analysis.uncertainty.datasetSimilarity}
-              unavailableReason="No released dataset-similarity model is installed."
-            />
-            {analysis.uncertainty.limitations.map((limitation) => (
+            {reminderNotice ? (
               <Text
-                key={limitation}
-                style={[styles.limitation, { color: theme.secondaryText }]}
+                accessibilityLiveRegion="polite"
+                style={[styles.notice, { color: theme.primary }]}
               >
-                • {limitation}
+                {reminderNotice}
               </Text>
-            ))}
+            ) : null}
+            {reminderError ? (
+              <Text
+                accessibilityRole="alert"
+                style={[styles.error, { color: theme.danger }]}
+              >
+                {reminderError}
+              </Text>
+            ) : null}
           </Card>
         </>
       ) : null}
-      {complete &&
-      analysis?.appearanceOutput?.enabled &&
-      analysis.appearanceOutput.gatePassed ? (
-        <Card>
-          <SectionTitle
-            title="Appearance descriptor"
-            subtitle="Pixel pattern only; it does not identify a condition."
-            icon="color-palette-outline"
-          />
-          <Text style={[styles.appearance, { color: theme.text }]}>
-            {analysis.appearanceOutput.topLabel?.replaceAll("-", " ") ??
-              "Unsupported"}
-          </Text>
-          <Text style={[styles.limitation, { color: theme.secondaryText }]}>
-            {analysis.appearanceOutput.limitation}
-          </Text>
-        </Card>
-      ) : null}
-      {complete && isReleasedModelOutput(analysis?.diseaseResearchOutput) ? (
-        <Card accent="amber">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              researchOpen
-                ? `Hide ${ADDITIONAL_ANALYSIS_TITLE.toLowerCase()}`
-                : `Show ${ADDITIONAL_ANALYSIS_TITLE.toLowerCase()}`
-            }
-            accessibilityState={{ expanded: researchOpen }}
-            onPress={() => setResearchOpen((value) => !value)}
-            style={({ pressed }) => [
-              styles.expand,
-              pressed && styles.expandPressed,
-            ]}
-          >
-            <SectionTitle
-              title={ADDITIONAL_ANALYSIS_TITLE}
-              subtitle="Additional context with its confidence and model version."
-              icon="flask-outline"
-            />
-            <Ionicons
-              name={researchOpen ? "chevron-up" : "chevron-down"}
-              color={theme.secondaryText}
-              size={20}
-            />
-          </Pressable>
-          {researchOpen ? (
-            <Text style={[styles.limitation, { color: theme.secondaryText }]}>
-              {`${analysis.diseaseResearchOutput.topLabel?.replaceAll("_", " ") ?? "No label"} · ${analysis.diseaseResearchOutput.limitation}`}
-            </Text>
-          ) : null}
-        </Card>
-      ) : null}
-      <Card accent="amber">
-        <SectionTitle
-          title={
-            guidance.enabled
-              ? guidance.reviewPriority === "professional_review_suggested"
-                ? "Professional review suggested"
-                : "Clinician-reviewed guidance"
-              : "Why no urgency level appears"
-          }
-          icon="information-circle-outline"
-        />
-        <Text style={[styles.limitation, { color: theme.text }]}>
-          {guidance.statusMessage}
-        </Text>
-        <Text style={[styles.limitation, { color: theme.secondaryText }]}>
-          {guidance.message}
-        </Text>
-      </Card>
-      <Card>
-        <SectionTitle
-          title={reminder.title}
-          subtitle={reminder.description}
-          icon="notifications-outline"
-        />
-        <Button
-          label={`Remind me in ${reminder.delayDays === 1 ? "1 day" : "7 days"}`}
-          icon="alarm-outline"
-          variant="secondary"
-          loading={reminderBusy}
-          loadingLabel="Scheduling reminder..."
-          onPress={() => {
-            setReminderBusy(true);
-            setReminderError(null);
-            setReminderNotice(null);
-            void scheduleObservationReminder({
-              captureId: capture.id,
-              suggestion: reminder,
-            })
-              .then(({ scheduledFor }) => {
-                setReminderNotice(
-                  `Reminder scheduled for ${scheduledFor.toLocaleString()}.`,
-                );
-              })
-              .catch((error: unknown) => {
-                setReminderError(
-                  error instanceof Error
-                    ? error.message
-                    : "The reminder could not be scheduled.",
-                );
-              })
-              .finally(() => setReminderBusy(false));
-          }}
-        />
-        {reminderNotice ? (
-          <Text
-            accessibilityLiveRegion="polite"
-            style={[styles.notice, { color: theme.primary }]}
-          >
-            {reminderNotice}
-          </Text>
-        ) : null}
-        {reminderError ? (
-          <Text
-            accessibilityRole="alert"
-            style={[styles.error, { color: theme.danger }]}
-          >
-            {reminderError}
-          </Text>
-        ) : null}
-      </Card>
       <Button
-        label="Open timeline"
-        icon="analytics-outline"
-        onPress={() => router.push("/(tabs)/timeline")}
+        label={next ? "Next region" : "Create report"}
+        icon={next ? "arrow-forward" : "document-text-outline"}
+        onPress={() => {
+          setActiveSession(capture.sessionId);
+          if (next)
+            router.replace({ pathname: "/capture/[region]", params: next });
+          else router.push("/report");
+        }}
       />
       <Button
-        label="Return to scan"
+        label="View on 3D map"
         variant="secondary"
-        icon="scan-outline"
-        onPress={() => router.replace("/(tabs)/scan")}
+        icon="cube-outline"
+        onPress={() =>
+          router.push({
+            pathname: "/(tabs)/map",
+            params: { region: capture.region, captureId: capture.id },
+          })
+        }
       />
+      <Text style={[styles.limitation, { color: theme.secondaryText }]}>
+        {DISCLAIMER}
+      </Text>
     </Screen>
   );
 }

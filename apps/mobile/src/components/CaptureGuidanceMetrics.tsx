@@ -42,7 +42,7 @@ export function CaptureGuidanceMetrics({
     exposureScore === null
       ? "After capture"
       : `${Math.round(Math.max(0, Math.min(1, exposureScore)) * 100)}%`;
-  const rows = [
+  const allRows = [
     {
       label: "Stability",
       value:
@@ -61,6 +61,7 @@ export function CaptureGuidanceMetrics({
       value: `${snapshot.targetWidthPercent}% guide width`,
     },
   ];
+  const rows = onCamera ? allRows.slice(0, 2) : allRows;
   const replayComparison =
     baselineSnapshot === undefined
       ? null
@@ -93,7 +94,11 @@ export function CaptureGuidanceMetrics({
   return (
     <View
       accessible
-      accessibilityLabel={`${sourceLabel(snapshot.source)}. ${captureGuidanceSummary(snapshot, exposureScore)}`}
+      accessibilityLabel={
+        onCamera
+          ? rows.map((row) => `${row.label}: ${row.value}`).join(". ")
+          : `${sourceLabel(snapshot.source)}. ${captureGuidanceSummary(snapshot, exposureScore)}`
+      }
       style={styles.container}
     >
       <Text style={[styles.source, { color: muted }]}>
@@ -112,11 +117,13 @@ export function CaptureGuidanceMetrics({
           </View>
         ))}
       </View>
-      <Text style={[styles.note, { color: muted }]}>
-        Distance proxy means the target outline size on screen. It is not a
-        measured camera-to-tissue distance. Physical units appear only after a
-        marker calibration passes.
-      </Text>
+      {!onCamera ? (
+        <Text style={[styles.note, { color: muted }]}>
+          Distance proxy means the target outline size on screen. It is not a
+          measured camera-to-tissue distance. Physical units appear only after a
+          marker calibration passes.
+        </Text>
+      ) : null}
       {replayComparison ? (
         <View
           style={[
@@ -177,17 +184,17 @@ const styles = StyleSheet.create({
   metric: {
     minWidth: 96,
     flexGrow: 1,
-    flexBasis: "30%",
+    flexBasis: "45%",
     paddingHorizontal: 9,
     paddingVertical: 7,
     borderRadius: 9,
   },
-  label: { fontSize: 9, lineHeight: 12, fontWeight: "700" },
+  label: { fontSize: 11, lineHeight: 16, fontWeight: "600" },
   value: {
     marginTop: 1,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "900",
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "700",
     fontVariant: ["tabular-nums"],
   },
   note: { fontSize: 9, lineHeight: 13 },

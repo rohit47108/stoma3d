@@ -37,7 +37,7 @@ export default function SettingsRoute() {
           onPress: () => {
             setDeleting(true);
             void deleteEverything()
-              .then(() => router.replace("/onboarding"))
+              .then(() => router.replace("/(tabs)/home"))
               .catch(() => {
                 setDeleting(false);
                 Alert.alert(
@@ -51,7 +51,16 @@ export default function SettingsRoute() {
     );
 
   return (
-    <Screen title="Settings & safety" eyebrow="Private local controls">
+    <Screen
+      title="Settings"
+      action={
+        <Button
+          label="Done"
+          variant="ghost"
+          onPress={() => router.replace("/(tabs)/home")}
+        />
+      }
+    >
       <Card accent={cloud.sessionStatus === "signed_in" ? "teal" : undefined}>
         <SectionTitle
           title={
@@ -88,7 +97,7 @@ export default function SettingsRoute() {
       <Card>
         <SectionTitle
           title="Accessibility"
-          subtitle="Stoma3D also follows your device text-size and appearance settings."
+          subtitle="Make the app easier to read and use."
           icon="accessibility-outline"
         />
         <ToggleRow

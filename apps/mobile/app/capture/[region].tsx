@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFaceDetection } from "@infinitered/react-native-mlkit-face-detection";
-import { router, useLocalSearchParams } from "expo-router";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { CameraView, useCameraPermissions, type CameraType } from "expo-camera";
 import { useVideoPlayer } from "expo-video";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { Accelerometer } from "expo-sensors";
@@ -9,7 +9,7 @@ import * as Crypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as Speech from "expo-speech";
-import { Image, Linking, StyleSheet, Text, View } from "react-native";
+import { AppState, Image, Linking, StyleSheet, Text, View } from "react-native";
 import {
   MOUTH_REGION_DETAILS,
   captureAngleSchema,
@@ -28,13 +28,7 @@ import {
   type CaptureGuidanceSource,
   type MotionSample,
 } from "@/components/captureGuidance";
-import {
-  Button,
-  Card,
-  ChoiceChip,
-  MetricBar,
-  SectionTitle,
-} from "@/components/Ui";
+import { Button, Card, ChoiceChip } from "@/components/Ui";
 import { captureStorageRejectionReasons } from "@/lib/analysisPolicy";
 import { analyzeCapture } from "@/lib/api";
 import { captureGuideSpec } from "@/lib/captureGuide";
@@ -43,11 +37,17 @@ import {
   sanitizeCameraCapture,
   sanitizeSelectedImage,
   sanitizeVideoFrame,
+  editSanitizedCapture,
   type SanitizedCapture,
 } from "@/lib/imagePipeline";
-import { withFaceDetectionResult } from "@/lib/privacyPolicy";
+import {
+  checkCapturePrivacy,
+  canSendForServerPrivacyCheck,
+  retryDraftQuality,
+} from "@/lib/privacyPolicy";
 import { latestPriorAcceptedCapture } from "@/lib/longitudinalPolicy";
 import { humanizeResultReason } from "@/lib/resultCopy";
+import { pickSelectedPhoto } from "@/lib/photoPicker";
 import {
   decryptToTemporaryFile,
   encryptFile,
@@ -64,7 +64,10 @@ import {
 import { useStoma3DStore } from "@/store/useStoma3DStore";
 import { useAppTheme } from "@/theme";
 import type { CaptureRecord } from "@/types";
-import { CALIBRATION_CARD_VERSION, PUBLIC_WEB_URL } from "@/constants";
+import { PhotoCropEditor } from "@/components/PhotoCropEditor";
+import { scanProgress } from "@/lib/scanLogic";
+
+const cameraForSession = new Map<string, CameraType>();
 
 interface CandidateState {
   capture: SanitizedCapture;
@@ -74,6 +77,9 @@ interface CandidateState {
   sourceVideoDurationMs?: number;
   frameTimeMs?: number;
   guidance: CaptureGuidanceSnapshot;
+  draftId?: string;
+  encryptedDraftUri?: string;
+  capturedAt?: string;
 }
 
 interface SweepCandidateState extends CandidateState {
@@ -94,8 +100,17 @@ export default function CaptureRoute() {
   const settings = useStoma3DStore((state) => state.settings);
   const captures = useStoma3DStore((state) => state.captures);
   const addCaptures = useStoma3DStore((state) => state.addCaptures);
+  const captureDrafts = useStoma3DStore((state) => state.captureDrafts);
+  const saveCaptureDraft = useStoma3DStore((state) => state.saveCaptureDraft);
+  const removeCaptureDraft = useStoma3DStore(
+    (state) => state.removeCaptureDraft,
+  );
   const faceDetector = useFaceDetection();
   const cameraRef = useRef<CameraView>(null);
+  const temporaryUris = useRef(new Set<string>());
+  const mounted = useRef(true);
+  const actionBusy = useRef(false);
+  const draftRestoreStarted = useRef(false);
   const videoPlayer = useVideoPlayer(null);
   const recordingStartedAt = useRef<number | null>(null);
   const previousMotion = useRef({ x: 0, y: 0, z: 1 });
@@ -108,6 +123,18 @@ export default function CaptureRoute() {
   const [motionReading, setMotionReading] = useState<MotionSample | null>(null);
   const [sensorAvailable, setSensorAvailable] = useState<boolean | null>(null);
   const [candidate, setCandidate] = useState<CandidateState | null>(null);
+  const [facing, setFacing] = useState<CameraType>(
+    () => cameraForSession.get(activeSessionId ?? "") ?? "front",
+  );
+  const [cameraMounted, setCameraMounted] = useState(true);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [screenFocused, setScreenFocused] = useState(true);
+  const [appActive, setAppActive] = useState(
+    AppState.currentState === "active",
+  );
+  const [moreOptions, setMoreOptions] = useState(false);
+  const [cropOpen, setCropOpen] = useState(false);
+  const [serverPrivacyConsent, setServerPrivacyConsent] = useState(false);
   const [sweepCandidates, setSweepCandidates] = useState<SweepCandidateState[]>(
     [],
   );
@@ -122,14 +149,10 @@ export default function CaptureRoute() {
   const [regionConfirmed, setRegionConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState("Working...");
-  const [photoPermissionBlocked, setPhotoPermissionBlocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ghostEnabled, setGhostEnabled] = useState(false);
   const [mirrorGuide, setMirrorGuide] = useState(false);
   const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(false);
-  const [calibrationEnabled, setCalibrationEnabled] = useState(false);
-  const [calibrationPlaneConfirmed, setCalibrationPlaneConfirmed] =
-    useState(false);
   const [ghostUri, setGhostUri] = useState<string | null>(null);
   const [ghostError, setGhostError] = useState<string | null>(null);
   const session = sessions.find((item) => item.id === activeSessionId) ?? null;
@@ -202,6 +225,76 @@ export default function CaptureRoute() {
   }, []);
 
   useEffect(() => {
+    if (
+      !region ||
+      !captureAngle ||
+      candidate ||
+      busy ||
+      draftRestoreStarted.current
+    )
+      return;
+    const draft = captureDrafts.find(
+      (item) =>
+        item.sessionId === activeSessionId &&
+        item.region === region &&
+        item.angle === captureAngle,
+    );
+    if (!draft) return;
+    draftRestoreStarted.current = true;
+    let active = true;
+    let openedUri: string | null = null;
+    setBusy(true);
+    setBusyLabel("Opening saved photo...");
+    void (async () => {
+      try {
+        openedUri = await decryptToTemporaryFile(
+          draft.encryptedUri,
+          draft.mimeType === "image/png" ? "png" : "jpg",
+          `capture:${draft.id}`,
+        );
+        const restored = await sanitizeSelectedImage(openedUri);
+        if (!active || !mounted.current) {
+          await removeTemporaryFile(restored.uri);
+          return;
+        }
+        temporaryUris.current.add(restored.uri);
+        setCandidate({
+          capture: {
+            ...restored,
+            source: draft.source,
+            privacyStatus: "passed",
+          },
+          quality: draft.quality,
+          angle: draft.angle,
+          mediaKind: "image",
+          guidance: createCaptureGuidanceSnapshot({
+            motion: null,
+            stability: 1,
+            sensorAvailable: false,
+            targetWidthPercent: captureGuideSpec(draft.region)
+              .targetWidthPercent,
+            source: "imported_photo",
+          }),
+          draftId: draft.id,
+          encryptedDraftUri: draft.encryptedUri,
+          capturedAt: draft.capturedAt,
+        });
+      } catch {
+        if (active)
+          setError(
+            "The saved photo could not open. Choose a new photo or try the camera.",
+          );
+      } finally {
+        await removeTemporaryFile(openedUri);
+        if (active) setBusy(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [activeSessionId, captureAngle, captureDrafts, region]);
+
+  useEffect(() => {
     if (!settings.voiceInstructions || !detail) return;
     Speech.speak(detail.captureInstruction, { rate: 0.9 });
     return () => {
@@ -210,14 +303,31 @@ export default function CaptureRoute() {
   }, [detail, settings.voiceInstructions]);
 
   useEffect(() => {
-    const uris = new Set([
-      ...(candidate ? [candidate.capture.uri] : []),
-      ...sweepCandidates.map((item) => item.capture.uri),
-    ]);
+    mounted.current = true;
     return () => {
-      for (const uri of uris) void removeTemporaryFile(uri);
+      mounted.current = false;
+      for (const uri of temporaryUris.current) void removeTemporaryFile(uri);
+      temporaryUris.current.clear();
     };
-  }, [candidate, sweepCandidates]);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      return () => setScreenFocused(false);
+    }, []),
+  );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      setAppActive(state === "active");
+      if (state !== "active") {
+        cameraRef.current?.stopRecording();
+        setCameraReady(false);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     if (!recording) return undefined;
@@ -236,6 +346,7 @@ export default function CaptureRoute() {
       !autoCaptureEnabled ||
       isSweep ||
       !permission?.granted ||
+      !cameraReady ||
       busy ||
       candidate ||
       sweepCandidates.length > 0 ||
@@ -253,6 +364,7 @@ export default function CaptureRoute() {
     candidate,
     isSweep,
     permission?.granted,
+    cameraReady,
     stability,
     sweepCandidates.length,
   ]);
@@ -330,31 +442,7 @@ export default function CaptureRoute() {
   const inspectCapture = async (
     capture: SanitizedCapture,
   ): Promise<{ capture: SanitizedCapture; quality: QualityResult }> => {
-    if (
-      faceDetector.status === "init" ||
-      faceDetector.status === "modelLoading" ||
-      faceDetector.status === "error"
-    ) {
-      await faceDetector.initialize({
-        performanceMode: "accurate",
-        landmarkMode: false,
-        contourMode: false,
-        classificationMode: false,
-        minFaceSize: 0.1,
-        isTrackingEnabled: false,
-      });
-    }
-    if (faceDetector.status === "error") {
-      throw new Error("The on-device privacy model could not start.");
-    }
-    const detection = await faceDetector.detectFaces(capture.uri);
-    if (!detection || !Array.isArray(detection.faces)) {
-      throw new Error("The on-device privacy check did not finish.");
-    }
-    const checkedCapture = withFaceDetectionResult(
-      capture,
-      detection.faces.length > 0,
-    );
+    const checkedCapture = await checkCapturePrivacy(capture, faceDetector);
     return {
       capture: checkedCapture,
       quality: qualityForSanitizedCapture(checkedCapture),
@@ -365,24 +453,13 @@ export default function CaptureRoute() {
     capture: SanitizedCapture,
     guidance: CaptureGuidanceSnapshot,
   ) => {
-    setBusyLabel("Checking privacy and image quality...");
-    let inspected: Awaited<ReturnType<typeof inspectCapture>>;
-    try {
-      inspected = await inspectCapture(capture);
-    } catch (privacyError) {
+    temporaryUris.current.add(capture.uri);
+    setBusyLabel("Checking photo...");
+    const inspected = await inspectCapture(capture);
+    if (!mounted.current) {
       await removeTemporaryFile(capture.uri);
-      setCandidate(null);
-      setSweepCandidates([]);
-      setRejectedQuality(null);
-      setRejectedGuidance(null);
-      setMouthOnlyConfirmed(false);
-      setRegionConfirmed(false);
-      setCalibrationPlaneConfirmed(false);
-      throw new Error(
-        privacyError instanceof Error
-          ? `${privacyError.message} The image was deleted and was not saved or uploaded.`
-          : "The on-device privacy check failed. The image was deleted and was not saved or uploaded.",
-      );
+      temporaryUris.current.delete(capture.uri);
+      return;
     }
     const { capture: checkedCapture, quality } = inspected;
     if (settings.haptics) {
@@ -392,17 +469,15 @@ export default function CaptureRoute() {
           : Haptics.NotificationFeedbackType.Warning,
       ).catch(() => undefined);
     }
-    if (!quality.accepted) {
-      await removeTemporaryFile(checkedCapture.uri);
-      setCandidate(null);
-      setSweepCandidates([]);
-      setRejectedQuality(quality);
-      setRejectedGuidance(guidance);
-      setMouthOnlyConfirmed(false);
-      setRegionConfirmed(false);
-      setCalibrationPlaneConfirmed(false);
-      return;
-    }
+    await Promise.all(
+      preparedCandidates
+        .filter((item) => item.capture.uri !== capture.uri)
+        .map(async (item) => {
+          await removeTemporaryFile(item.capture.uri);
+          temporaryUris.current.delete(item.capture.uri);
+          if (item.draftId) await removeCaptureDraft(item.draftId);
+        }),
+    );
     setRejectedQuality(null);
     setRejectedGuidance(null);
     setSweepCandidates([]);
@@ -412,16 +487,20 @@ export default function CaptureRoute() {
       angle: captureAngle,
       mediaKind: "image",
       guidance,
+      capturedAt: new Date().toISOString(),
     });
     setMouthOnlyConfirmed(false);
     setRegionConfirmed(false);
-    setCalibrationPlaneConfirmed(false);
+    setServerPrivacyConsent(false);
+    setCropOpen(false);
   };
 
   const takePhoto = async () => {
+    if (actionBusy.current) return;
+    actionBusy.current = true;
     setError(null);
     setBusy(true);
-    setBusyLabel("Capturing image...");
+    setBusyLabel("Taking photo...");
     let rawPhotoUri: string | null = null;
     const guidance = guidanceSnapshot("live_camera");
     try {
@@ -435,6 +514,7 @@ export default function CaptureRoute() {
         await sanitizeCameraCapture(
           photo.uri,
           sensorAvailable === false || stability >= 0.9,
+          facing === "front",
         ),
         guidance,
       );
@@ -447,6 +527,7 @@ export default function CaptureRoute() {
     } finally {
       await removeTemporaryFile(rawPhotoUri);
       setBusy(false);
+      actionBusy.current = false;
     }
   };
   autoCaptureAction.current = () => {
@@ -454,6 +535,8 @@ export default function CaptureRoute() {
   };
 
   const recordSweep = async () => {
+    if (actionBusy.current) return;
+    actionBusy.current = true;
     setError(null);
     setRejectedQuality(null);
     setRejectedGuidance(null);
@@ -500,7 +583,11 @@ export default function CaptureRoute() {
           format: SaveFormat.JPEG,
         });
         renderedFrameUris.push(saved.uri);
-        const sanitized = await sanitizeVideoFrame(saved.uri);
+        const sanitized = await sanitizeVideoFrame(
+          saved.uri,
+          facing === "front",
+        );
+        temporaryUris.current.add(sanitized.uri);
         try {
           const inspected = await inspectCapture(sanitized);
           inspectedFrames.push({
@@ -541,7 +628,6 @@ export default function CaptureRoute() {
       setSweepCandidates(best);
       setMouthOnlyConfirmed(false);
       setRegionConfirmed(false);
-      setCalibrationPlaneConfirmed(false);
       if (settings.haptics) {
         await Haptics.notificationAsync(
           Haptics.NotificationFeedbackType.Success,
@@ -552,7 +638,6 @@ export default function CaptureRoute() {
       setSweepCandidates([]);
       setMouthOnlyConfirmed(false);
       setRegionConfirmed(false);
-      setCalibrationPlaneConfirmed(false);
       setError(
         sweepError instanceof Error
           ? sweepError.message
@@ -570,6 +655,7 @@ export default function CaptureRoute() {
       recordingStartedAt.current = null;
       setRecording(false);
       setBusy(false);
+      actionBusy.current = false;
     }
   };
 
@@ -585,37 +671,15 @@ export default function CaptureRoute() {
   };
 
   const choosePhoto = async () => {
+    if (actionBusy.current) return;
+    actionBusy.current = true;
     setBusy(true);
     setBusyLabel("Opening photo library...");
     setError(null);
     let pickerTemporaryUri: string | null = null;
     try {
-      const permission =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
-      setPhotoPermissionBlocked(
-        !permission.granted && permission.canAskAgain === false,
-      );
-      if (!permission.granted) {
-        setError(
-          permission.canAskAgain
-            ? "Photo access was not granted. You can try again or use the camera."
-            : "Photo access is disabled. Open device settings to allow selected-photo access.",
-        );
-        return;
-      }
-      const selection = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsEditing: false,
-        allowsMultipleSelection: false,
-        exif: false,
-        quality: 1,
-        selectionLimit: 1,
-      });
-      if (selection.canceled) return;
-      const asset = selection.assets[0];
-      if (!asset?.uri) {
-        throw new Error("The photo library did not return an image.");
-      }
+      const asset = await pickSelectedPhoto(ImagePicker);
+      if (!asset) return;
       pickerTemporaryUri = asset.uri;
       setBusyLabel("Checking selected image...");
       await prepareCandidate(
@@ -631,12 +695,17 @@ export default function CaptureRoute() {
     } finally {
       await removePickerTemporaryCopy(pickerTemporaryUri);
       setBusy(false);
+      actionBusy.current = false;
     }
   };
 
   const retake = async () => {
     await Promise.all(
-      preparedCandidates.map((item) => removeTemporaryFile(item.capture.uri)),
+      preparedCandidates.map(async (item) => {
+        await removeTemporaryFile(item.capture.uri);
+        temporaryUris.current.delete(item.capture.uri);
+        if (item.draftId) await removeCaptureDraft(item.draftId);
+      }),
     );
     setCandidate(null);
     setSweepCandidates([]);
@@ -644,7 +713,8 @@ export default function CaptureRoute() {
     setRejectedGuidance(null);
     setMouthOnlyConfirmed(false);
     setRegionConfirmed(false);
-    setCalibrationPlaneConfirmed(false);
+    setCropOpen(false);
+    setServerPrivacyConsent(false);
   };
 
   const acceptAndAnalyze = async () => {
@@ -653,13 +723,21 @@ export default function CaptureRoute() {
       !activeSessionId ||
       preparedCandidates.some((item) => !item.quality.accepted) ||
       !mouthOnlyConfirmed ||
-      !regionConfirmed
+      !regionConfirmed ||
+      preparedCandidates.some(
+        (item) =>
+          item.capture.privacyStatus === "unavailable" &&
+          !canSendForServerPrivacyCheck(item.capture, serverPrivacyConsent),
+      ) ||
+      actionBusy.current
     )
       return;
+    actionBusy.current = true;
     setBusy(true);
-    setBusyLabel("Protecting and uploading...");
+    setBusyLabel("Analyzing photo...");
     setError(null);
     const protectedUris: string[] = [];
+    const committedDraftIds: string[] = [];
     let captureCommitted = false;
     try {
       const entries: Array<{
@@ -669,15 +747,44 @@ export default function CaptureRoute() {
       for (const [index, prepared] of preparedCandidates.entries()) {
         setBusyLabel(
           preparedCandidates.length === 1
-            ? "Protecting and analyzing..."
-            : `Protecting and analyzing view ${index + 1} of ${preparedCandidates.length}...`,
+            ? "Analyzing photo..."
+            : `Analyzing view ${index + 1} of ${preparedCandidates.length}...`,
         );
-        const captureId = Crypto.randomUUID();
-        const encryptedUri = await encryptFile(
-          prepared.capture.uri,
-          `capture:${captureId}`,
-        );
-        protectedUris.push(encryptedUri);
+        const captureId = prepared.draftId ?? Crypto.randomUUID();
+        const capturedAt = prepared.capturedAt ?? new Date().toISOString();
+        let draftEncryptedUri = prepared.encryptedDraftUri;
+        const draftQuality = retryDraftQuality(prepared.capture);
+        if (preparedCandidates.length === 1 && draftQuality) {
+          const createdDraft = !draftEncryptedUri;
+          draftEncryptedUri ??= await encryptFile(
+            prepared.capture.uri,
+            `capture:${captureId}`,
+          );
+          if (createdDraft) protectedUris.push(draftEncryptedUri);
+          await saveCaptureDraft({
+            id: captureId,
+            sessionId: activeSessionId,
+            region,
+            angle: prepared.angle,
+            encryptedUri: draftEncryptedUri,
+            mimeType: prepared.capture.mimeType,
+            source: prepared.capture.source as "camera" | "photo_library",
+            width: prepared.capture.width,
+            height: prepared.capture.height,
+            byteSize: prepared.capture.byteSize,
+            quality: draftQuality,
+            capturedAt,
+            privacyPassed: true,
+          });
+          if (createdDraft)
+            protectedUris.splice(protectedUris.indexOf(draftEncryptedUri), 1);
+          setCandidate({
+            ...prepared,
+            draftId: captureId,
+            encryptedDraftUri: draftEncryptedUri,
+            capturedAt,
+          });
+        }
         const analysis = await analyzeCapture({
           captureId,
           selectedRegion: region,
@@ -685,42 +792,47 @@ export default function CaptureRoute() {
           mimeType: prepared.capture.mimeType,
           inputOrigin: "live_capture",
           localQuality: prepared.quality,
-          ...(calibrationEnabled
-            ? {
-                calibration: {
-                  cardVersion: CALIBRATION_CARD_VERSION,
-                  markerId: 17,
-                  markerSideMm: 20,
-                  planeConfirmed: calibrationPlaneConfirmed,
-                } as const,
-              }
-            : {}),
         });
+        if (analysis.analysisOrigin === "unavailable") {
+          throw new Error(
+            analysis.abstentionReasons[0] ??
+              "Analysis could not finish. Your photo is still here. Try again.",
+          );
+        }
         const serverRejectionReasons = captureStorageRejectionReasons(
           analysis,
           region,
         );
         if (serverRejectionReasons.length > 0) {
+          if (draftEncryptedUri) {
+            await removeCaptureDraft(captureId);
+            setCandidate({
+              ...prepared,
+              draftId: undefined,
+              encryptedDraftUri: undefined,
+            });
+          }
           setRejectedQuality({
             ...analysis.quality,
             accepted: false,
             reasons: serverRejectionReasons,
           });
           setRejectedGuidance(prepared.guidance);
-          await Promise.all(
-            preparedCandidates.map((item) =>
-              removeTemporaryFile(item.capture.uri),
-            ),
-          );
-          setCandidate(null);
-          setSweepCandidates([]);
-          setMouthOnlyConfirmed(false);
-          setRegionConfirmed(false);
-          setCalibrationPlaneConfirmed(false);
           throw new Error(
-            "One view did not pass the service anatomy and quality checks. The entire set was discarded.",
+            serverRejectionReasons.map(humanizeResultReason).join(" "),
           );
         }
+        if (analysis.status === "failed")
+          throw new Error(
+            analysis.abstentionReasons[0] ??
+              "Analysis could not finish. Your photo is still here. Try again.",
+          );
+        // Server privacy, quality, identity and signature checks have passed.
+        const encryptedUri =
+          draftEncryptedUri ??
+          (await encryptFile(prepared.capture.uri, `capture:${captureId}`));
+        if (draftEncryptedUri) committedDraftIds.push(captureId);
+        else protectedUris.push(encryptedUri);
         entries.push({
           capture: {
             id: captureId,
@@ -728,7 +840,7 @@ export default function CaptureRoute() {
             region,
             angle: prepared.angle,
             mediaKind: prepared.mediaKind,
-            capturedAt: new Date().toISOString(),
+            capturedAt,
             encryptedUri,
             mimeType: prepared.capture.mimeType,
             inputOrigin: "live_capture",
@@ -739,13 +851,6 @@ export default function CaptureRoute() {
             ...(prepared.frameTimeMs === undefined
               ? {}
               : { frameTimeMs: prepared.frameTimeMs }),
-            ...(calibrationEnabled
-              ? {
-                  calibrationRequested: true,
-                  calibrationPlaneConfirmed: true,
-                  calibrationCardVersion: CALIBRATION_CARD_VERSION,
-                }
-              : {}),
             privacyConfirmedByUser: mouthOnlyConfirmed,
             regionConfirmedByUser: regionConfirmed,
             captureGuidance: prepared.guidance,
@@ -756,6 +861,7 @@ export default function CaptureRoute() {
       }
       await addCaptures(entries);
       captureCommitted = true;
+      await Promise.all(committedDraftIds.map((id) => removeCaptureDraft(id)));
       await Promise.all(
         preparedCandidates.map((item) => removeTemporaryFile(item.capture.uri)),
       );
@@ -780,17 +886,61 @@ export default function CaptureRoute() {
         await Promise.all(protectedUris.map((uri) => removeProtectedFile(uri)));
       }
       setBusy(false);
+      actionBusy.current = false;
     }
   };
 
+  const switchCamera = async () => {
+    if (busy || recording || actionBusy.current) return;
+    actionBusy.current = true;
+    setError(null);
+    setCameraReady(false);
+    await cameraRef.current?.pausePreview().catch(() => undefined);
+    setCameraMounted(false);
+    requestAnimationFrame(() => {
+      if (!mounted.current) return;
+      const next = facing === "front" ? "back" : "front";
+      cameraForSession.set(session.id, next);
+      setFacing(next);
+      requestAnimationFrame(() => {
+        if (mounted.current) setCameraMounted(true);
+        actionBusy.current = false;
+      });
+    });
+  };
+
+  const editPhoto = async (
+    edit: Parameters<typeof editSanitizedCapture>[1],
+  ) => {
+    if (!candidate || actionBusy.current) return;
+    actionBusy.current = true;
+    setBusy(true);
+    setBusyLabel("Checking photo...");
+    setError(null);
+    try {
+      const edited = await editSanitizedCapture(candidate.capture, edit);
+      await prepareCandidate(edited, candidate.guidance);
+    } catch {
+      setError(
+        "The photo could not be edited. Your original photo is still here.",
+      );
+    } finally {
+      setBusy(false);
+      actionBusy.current = false;
+    }
+  };
+
+  const progress = scanProgress(captures, session.id);
+  const privacyUnavailable = candidate?.capture.privacyStatus === "unavailable";
+  const needsCrop = candidate?.capture.privacyStatus === "face_detected";
+  const serverPrivacyReady = candidate
+    ? canSendForServerPrivacyCheck(candidate.capture, serverPrivacyConsent)
+    : false;
+
   return (
     <Screen
-      title={detail.shortLabel}
-      eyebrow={
-        isSweep
-          ? "Six-second guided sweep"
-          : `${captureAngle.replaceAll("_", " ")} view`
-      }
+      title={candidate ? "Review photo" : detail.shortLabel}
+      eyebrow={`Region ${Math.min(8, progress.completed + 1)} of 8`}
       action={
         <Button
           label="Back"
@@ -803,21 +953,31 @@ export default function CaptureRoute() {
       {!candidate ? (
         <>
           <View style={[styles.cameraShell, { backgroundColor: theme.navy }]}>
-            {permission?.granted ? (
+            {permission?.granted &&
+            cameraMounted &&
+            screenFocused &&
+            appActive ? (
               <CameraView
+                key={facing}
                 ref={cameraRef}
                 style={StyleSheet.absoluteFill}
-                facing="back"
+                facing={facing}
+                mirror={facing === "front"}
                 mode={isSweep ? "video" : "picture"}
                 mute
                 videoQuality="720p"
+                onCameraReady={() => setCameraReady(true)}
+                onMountError={() => {
+                  setCameraReady(false);
+                  setError(
+                    "The camera could not open. Try switching cameras or choose a photo.",
+                  );
+                }}
               />
-            ) : (
+            ) : !permission?.granted ? (
               <View style={styles.permission}>
                 <Text style={styles.permissionText}>
-                  {permission?.canAskAgain === false
-                    ? `Camera access is disabled in device settings.${isSweep ? " A guided sweep requires the live camera." : " You can still choose a saved photo."}`
-                    : `Allow camera access to ${isSweep ? "record a short guided sweep" : "capture a new image"}${isSweep ? "." : ", or choose a saved photo below."}`}
+                  Use the camera or choose a mouth photo.
                 </Text>
                 <Button
                   label={
@@ -826,45 +986,40 @@ export default function CaptureRoute() {
                       : "Allow camera"
                   }
                   onPress={() => {
-                    if (permission?.canAskAgain === false) {
+                    if (permission?.canAskAgain === false)
                       void Linking.openSettings();
-                    } else {
-                      void askForCamera();
-                    }
+                    else void askForCamera();
                   }}
                 />
               </View>
-            )}
+            ) : null}
             {permission?.granted && ghostUri ? (
               <View pointerEvents="none" style={styles.ghostLayer}>
                 <Image
                   accessible={false}
                   source={{ uri: ghostUri }}
                   resizeMode="cover"
-                  style={StyleSheet.absoluteFill}
+                  style={[
+                    StyleSheet.absoluteFill,
+                    facing === "front" ? styles.mirroredOverlay : undefined,
+                  ]}
                 />
               </View>
             ) : null}
             {permission?.granted ? (
               <View pointerEvents="none" style={styles.guide}>
-                <View style={mirrorGuide ? styles.mirroredOverlay : undefined}>
-                  <CaptureGuideOverlay region={region} />
-                </View>
-                {ghostUri ? (
-                  <Text style={styles.ghostLabel}>
-                    Earlier scan alignment guide
-                  </Text>
-                ) : null}
+                <CaptureGuideOverlay
+                  region={region}
+                  mirrored={mirrorGuide !== (facing === "front")}
+                />
                 <Text style={styles.instruction}>
                   {recording
-                    ? sweepInstruction(sweepElapsedMs / 6_000)
-                    : isSweep
-                      ? `${detail.captureInstruction} Then move slowly from straight to left to right.`
-                      : detail.captureInstruction}
+                    ? sweepInstruction(sweepElapsedMs / 6000)
+                    : detail.captureInstruction}
                 </Text>
                 {recording ? (
                   <Text style={styles.recordingLabel}>
-                    Recording · {(sweepElapsedMs / 1_000).toFixed(1)} of 6.0
+                    Recording · {(sweepElapsedMs / 1000).toFixed(1)} of 6
                     seconds
                   </Text>
                 ) : null}
@@ -881,211 +1036,109 @@ export default function CaptureRoute() {
                       captureGuideSpec(region).targetWidthPercent,
                     source: "live_camera",
                   })}
-                  {...(priorCapture
-                    ? {
-                        baselineSnapshot: priorCapture.captureGuidance ?? null,
-                        baselineExposureScore:
-                          priorCapture.quality.exposureScore,
-                        baselineMillimetersPerPixel:
-                          calibratedScale(priorCapture),
-                      }
-                    : {})}
                   tone="camera"
                 />
               </View>
             ) : null}
           </View>
-          {isSweep ? (
-            recording ? (
-              <Button
-                label="Stop and check frames"
-                icon="stop-circle-outline"
-                variant="secondary"
-                onPress={() => cameraRef.current?.stopRecording()}
-              />
-            ) : (
-              <Button
-                label="Record guided sweep"
-                icon="videocam-outline"
-                loading={busy}
-                loadingLabel={busyLabel}
-                disabled={
-                  !permission?.granted ||
-                  (sensorAvailable !== false && stability < 0.9)
-                }
-                onPress={() => {
-                  void recordSweep();
-                }}
-              />
-            )
-          ) : (
-            <>
-              <Button
-                label="Capture live image"
-                icon="camera"
-                loading={busy}
-                loadingLabel={busyLabel}
-                disabled={
-                  !permission?.granted ||
-                  (sensorAvailable !== false && stability < 0.9)
-                }
-                onPress={() => {
-                  void takePhoto();
-                }}
-              />
-              <Button
-                label="Choose a saved mouth image"
-                icon="images-outline"
-                variant="secondary"
-                loading={busy}
-                loadingLabel={busyLabel}
-                onPress={() => {
-                  void choosePhoto();
-                }}
-              />
-            </>
-          )}
-          <View style={styles.captureOptions}>
+          <Button
+            label={
+              recording
+                ? "Stop recording"
+                : isSweep
+                  ? "Record sweep"
+                  : "Take photo"
+            }
+            icon={recording ? "stop-circle-outline" : "camera"}
+            loading={busy && !recording}
+            loadingLabel={busyLabel}
+            disabled={!permission?.granted || !cameraReady}
+            onPress={() => {
+              if (recording) cameraRef.current?.stopRecording();
+              else if (isSweep) void recordSweep();
+              else void takePhoto();
+            }}
+          />
+          <View style={styles.secondaryActions}>
             {!isSweep ? (
-              <ChoiceChip
-                label="Auto-capture when the stability ring fills"
-                selected={autoCaptureEnabled}
-                onPress={() => setAutoCaptureEnabled((value) => !value)}
-                accessibilityRole="checkbox"
+              <Button
+                label="Choose photo"
+                icon="images-outline"
+                variant="ghost"
+                disabled={busy}
+                onPress={() => void choosePhoto()}
+                style={styles.secondaryAction}
               />
             ) : null}
-            <ChoiceChip
-              label="Mirror the anatomical guide"
-              selected={mirrorGuide}
-              onPress={() => setMirrorGuide((value) => !value)}
-              accessibilityRole="checkbox"
+            <Button
+              label="Switch camera"
+              icon="camera-reverse-outline"
+              variant="ghost"
+              disabled={busy || !permission?.granted}
+              onPress={() => void switchCamera()}
+              style={styles.secondaryAction}
             />
           </View>
-          {priorCapture && permission?.granted ? (
-            <Button
-              label={
-                ghostEnabled
-                  ? "Hide earlier alignment guide"
-                  : "Show earlier alignment guide"
-              }
-              icon={ghostEnabled ? "eye-off-outline" : "layers-outline"}
-              variant="secondary"
-              disabled={busy}
-              onPress={() => setGhostEnabled((value) => !value)}
-            />
-          ) : null}
-          {ghostError ? (
-            <Text style={[styles.error, { color: theme.danger }]}>
-              {ghostError}
-            </Text>
-          ) : null}
-          {priorCapture ? (
-            <Text style={[styles.sensorNote, { color: theme.secondaryText }]}>
-              The optional guide is a locally decrypted earlier image from a
-              different scan session. It is never added to the new photograph
-              and is removed from temporary storage when hidden or when you
-              leave this screen.
-            </Text>
-          ) : null}
-          {sensorAvailable === false ? (
-            <Text style={[styles.sensorNote, { color: theme.secondaryText }]}>
-              Motion sensing is unavailable on this device. Stoma3D will rely on
-              the post-capture focus and exposure checks.
-            </Text>
-          ) : null}
-          <Text style={[styles.privacy, { color: theme.secondaryText }]}>
-            {isSweep
-              ? "The raw sweep stays in temporary device storage while Stoma3D selects quality-checked frames, then is deleted. Only the three confirmed frames can be protected or uploaded."
-              : "Camera and library images are re-encoded to remove metadata and checked on this device for image quality and visible faces before protected storage or upload. You must also confirm the privacy framing before anything is sent."}
-          </Text>
-          {settings.caregiverMode ? (
-            <Card accent="teal">
-              <SectionTitle
-                title="Caregiver-assisted capture"
-                subtitle="Ask the person to stay seated, explain each step, and stop if they are uncomfortable. Confirm their permission before every image."
-                icon="people-outline"
-              />
-            </Card>
-          ) : null}
-          <Card accent={calibrationEnabled ? "teal" : undefined}>
-            <SectionTitle
-              title="Optional physical scale card"
-              subtitle="Use the printed 20 mm Stoma3D marker only when someone can hold it beside the target without touching tissue. The marker and target must stay in the same plane."
-              icon="resize-outline"
-            />
-            <ChoiceChip
-              label="Include the versioned scale card in this capture"
-              selected={calibrationEnabled}
-              onPress={() => {
-                setCalibrationEnabled((value) => {
-                  if (value) setCalibrationPlaneConfirmed(false);
-                  return !value;
-                });
-              }}
-              accessibilityRole="checkbox"
-            />
-            {PUBLIC_WEB_URL ? (
-              <Button
-                label="Open printable calibration card"
-                icon="print-outline"
-                variant="ghost"
-                onPress={() => {
-                  void Linking.openURL(`${PUBLIC_WEB_URL}/calibration`);
-                }}
-              />
-            ) : null}
-            <Text style={[styles.sensorNote, { color: theme.secondaryText }]}>
-              A millimeter estimate is shown only if the exact marker is
-              detected and every calibration gate passes. Otherwise the app
-              keeps image-normalized approximate measurements.
-            </Text>
-          </Card>
-          {rejectedQuality ? (
-            <Card accent="coral">
-              <SectionTitle
-                title="Capture discarded · retake needed"
-                subtitle="Rejected temporary images and raw video have already been deleted."
-                icon="refresh-circle-outline"
-              />
-              <MetricBar label="Focus" value={rejectedQuality.blurScore} />
-              <MetricBar
-                label="Exposure"
-                value={rejectedQuality.exposureScore}
-              />
-              <MetricBar
-                label="Glare control"
-                value={1 - rejectedQuality.glareScore}
-              />
-              <MetricBar
-                label="Visibility"
-                value={1 - rejectedQuality.obstructionScore}
-              />
-              {rejectedQuality.reasons.map((reason) => (
-                <Text
-                  key={reason}
-                  style={[styles.reason, { color: theme.danger }]}
-                >
-                  • {humanizeResultReason(reason)}
-                </Text>
-              ))}
-              {rejectedGuidance ? (
-                <CaptureGuidanceMetrics
-                  snapshot={rejectedGuidance}
-                  exposureScore={rejectedQuality.exposureScore}
-                  {...(priorCapture
-                    ? {
-                        baselineSnapshot: priorCapture.captureGuidance ?? null,
-                        baselineExposureScore:
-                          priorCapture.quality.exposureScore,
-                        baselineMillimetersPerPixel:
-                          calibratedScale(priorCapture),
-                      }
-                    : {})}
+          <Button
+            label={moreOptions ? "Hide options" : "More options"}
+            icon="options-outline"
+            variant="ghost"
+            disabled={busy}
+            onPress={() => setMoreOptions((value) => !value)}
+          />
+          {moreOptions ? (
+            <View style={styles.captureOptions}>
+              {!isSweep ? (
+                <ChoiceChip
+                  label="Take photo automatically when still"
+                  selected={autoCaptureEnabled}
+                  onPress={() => setAutoCaptureEnabled((value) => !value)}
+                  accessibilityRole="checkbox"
                 />
               ) : null}
-            </Card>
+              <ChoiceChip
+                label="Flip guide"
+                selected={mirrorGuide}
+                onPress={() => setMirrorGuide((value) => !value)}
+                accessibilityRole="checkbox"
+              />
+              {priorCapture ? (
+                <Button
+                  label={
+                    ghostEnabled ? "Hide earlier photo" : "Show earlier photo"
+                  }
+                  icon="layers-outline"
+                  variant="ghost"
+                  onPress={() => setGhostEnabled((value) => !value)}
+                />
+              ) : null}
+              {ghostError ? (
+                <Text style={[styles.error, { color: theme.danger }]}>
+                  {ghostError}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+          {settings.caregiverMode ? (
+            <Text style={[styles.sensorNote, { color: theme.secondaryText }]}>
+              Make sure the person is comfortable and has agreed to each photo.
+            </Text>
+          ) : null}
+          {rejectedQuality ? (
+            <Text style={[styles.reason, { color: theme.danger }]}>
+              {rejectedQuality.reasons.map(humanizeResultReason).join(" ")}
+            </Text>
           ) : null}
         </>
+      ) : cropOpen ? (
+        <PhotoCropEditor
+          uri={candidate.capture.uri}
+          width={candidate.capture.width}
+          height={candidate.capture.height}
+          busy={busy}
+          onCrop={(crop) => void editPhoto({ crop })}
+          onCancel={() => setCropOpen(false)}
+        />
       ) : (
         <>
           {sweepCandidates.length > 0 ? (
@@ -1093,10 +1146,9 @@ export default function CaptureRoute() {
               {sweepCandidates.map((item) => (
                 <View key={item.angle} style={styles.sweepPreviewItem}>
                   <Image
-                    accessible
-                    accessibilityLabel={`${item.angle.replaceAll("_", " ")} preview of ${detail.label}`}
+                    accessibilityLabel={`${item.angle.replaceAll("_", " ")} photo`}
                     source={{ uri: item.capture.uri }}
-                    resizeMode="cover"
+                    resizeMode="contain"
                     style={[
                       styles.sweepPreview,
                       { backgroundColor: theme.navy },
@@ -1112,120 +1164,106 @@ export default function CaptureRoute() {
             </View>
           ) : (
             <Image
-              accessible
-              accessibilityLabel={`Preview of ${detail.label} before protected storage`}
+              accessibilityLabel={`Photo of ${detail.label}`}
               source={{ uri: candidate.capture.uri }}
               resizeMode="contain"
               style={[styles.preview, { backgroundColor: theme.navy }]}
             />
           )}
-          <Card accent={candidate.quality.accepted ? "teal" : "coral"}>
-            <SectionTitle
-              title={
-                candidate.quality.accepted
-                  ? "Image quality accepted"
-                  : "Retake needed"
-              }
-              subtitle={`${candidate.capture.source === "camera" ? "Camera image" : candidate.capture.source === "video_sweep" ? "Three sweep frames" : "Selected photo"}, metadata removed, ${candidate.capture.width} by ${candidate.capture.height} pixels`}
-              icon={
-                candidate.quality.accepted
-                  ? "checkmark-circle-outline"
-                  : "refresh-circle-outline"
-              }
-            />
-            <MetricBar label="Focus" value={candidate.quality.blurScore} />
-            <MetricBar
-              label="Exposure"
-              value={candidate.quality.exposureScore}
-            />
-            <MetricBar
-              label="Glare control"
-              value={1 - candidate.quality.glareScore}
-            />
-            <MetricBar
-              label="Visibility"
-              value={1 - candidate.quality.obstructionScore}
-            />
-            <CaptureGuidanceMetrics
-              snapshot={candidate.guidance}
-              exposureScore={candidate.quality.exposureScore}
-              {...(priorCapture
-                ? {
-                    baselineSnapshot: priorCapture.captureGuidance ?? null,
-                    baselineExposureScore: priorCapture.quality.exposureScore,
-                    baselineMillimetersPerPixel: calibratedScale(priorCapture),
-                  }
-                : {})}
-            />
-            {candidate.quality.reasons.map((reason) => (
-              <Text
-                key={reason}
-                style={[styles.reason, { color: theme.danger }]}
-              >
-                • {humanizeResultReason(reason)}
-              </Text>
-            ))}
-          </Card>
-          {candidate.quality.accepted ? (
-            <Card accent="amber">
-              <SectionTitle
-                title="Confirm before upload"
-                subtitle="The on-device face check passed. Your confirmation is still required because an automated check can miss identifying details. The selected mouth region is checked again by the server before the image is accepted."
-                icon="shield-outline"
+          <Text style={[styles.reviewInstruction, { color: theme.text }]}>
+            {needsCrop
+              ? "Crop out the face. Keep only the mouth area."
+              : privacyUnavailable
+                ? "Crop to the mouth area so the service can check this photo."
+                : "Check that the mouth area is clear and fully visible."}
+          </Text>
+          {candidate.quality.reasons.map((reason) => (
+            <Text key={reason} style={[styles.reason, { color: theme.danger }]}>
+              {humanizeResultReason(reason)}
+            </Text>
+          ))}
+          {rejectedQuality ? (
+            <Text
+              accessibilityRole="alert"
+              style={[styles.reason, { color: theme.danger }]}
+            >
+              {rejectedQuality.reasons.map(humanizeResultReason).join(" ")}
+            </Text>
+          ) : null}
+          {!isSweep ? (
+            <View style={styles.secondaryActions}>
+              <Button
+                label="Crop"
+                icon="crop-outline"
+                variant="ghost"
+                disabled={busy}
+                onPress={() => setCropOpen(true)}
+                style={styles.secondaryAction}
               />
+              <Button
+                label="Rotate"
+                icon="refresh-outline"
+                variant="ghost"
+                disabled={busy}
+                onPress={() => void editPhoto({ rotate: 90 })}
+                style={styles.secondaryAction}
+              />
+            </View>
+          ) : null}
+          {!needsCrop && candidate.quality.accepted ? (
+            <>
               <ChoiceChip
-                label={`I confirm ${sweepCandidates.length > 0 ? "these frames show" : "this frame shows"} mouth tissue only: no full face, eyes, name, or identifying surroundings are visible, and I have permission to capture it`}
-                selected={mouthOnlyConfirmed}
-                onPress={() => setMouthOnlyConfirmed((value) => !value)}
+                label={`This shows ${detail.label} only, and I have permission to use it.`}
+                selected={mouthOnlyConfirmed && regionConfirmed}
+                onPress={() => {
+                  const confirmed = !(mouthOnlyConfirmed && regionConfirmed);
+                  setMouthOnlyConfirmed(confirmed);
+                  setRegionConfirmed(confirmed);
+                }}
                 accessibilityRole="checkbox"
               />
-              <ChoiceChip
-                label={`I confirm ${sweepCandidates.length > 0 ? "these frames show" : "this image shows"} ${detail.label}`}
-                selected={regionConfirmed}
-                onPress={() => setRegionConfirmed((value) => !value)}
-                accessibilityRole="checkbox"
-              />
-              {calibrationEnabled ? (
+              {privacyUnavailable && candidate.capture.cropped ? (
                 <ChoiceChip
-                  label={`I confirm the printed 20 mm marker ${sweepCandidates.length > 0 ? "stayed" : "is"} beside the target, in the same plane, and did not touch tissue`}
-                  selected={calibrationPlaneConfirmed}
-                  onPress={() =>
-                    setCalibrationPlaneConfirmed((value) => !value)
-                  }
+                  label="Send this cropped photo for a private service check."
+                  selected={serverPrivacyConsent}
+                  onPress={() => setServerPrivacyConsent((value) => !value)}
                   accessibilityRole="checkbox"
                 />
               ) : null}
-            </Card>
-          ) : null}
-          {candidate.quality.accepted ? (
+              <Button
+                label="Use photo"
+                icon="checkmark"
+                loading={busy}
+                loadingLabel={busyLabel}
+                disabled={
+                  !mouthOnlyConfirmed ||
+                  !regionConfirmed ||
+                  (privacyUnavailable && !serverPrivacyReady)
+                }
+                onPress={() => void acceptAndAnalyze()}
+              />
+            </>
+          ) : needsCrop ? (
             <Button
-              label={
-                sweepCandidates.length > 0
-                  ? "Protect 3 frames & analyze"
-                  : "Protect image & analyze"
-              }
-              icon="shield-checkmark-outline"
-              loading={busy}
-              loadingLabel={busyLabel}
-              disabled={
-                !mouthOnlyConfirmed ||
-                !regionConfirmed ||
-                (calibrationEnabled && !calibrationPlaneConfirmed) ||
-                !activeSessionId ||
-                busy
-              }
-              onPress={() => {
-                void acceptAndAnalyze();
-              }}
+              label="Crop mouth area"
+              icon="crop-outline"
+              disabled={busy}
+              onPress={() => setCropOpen(true)}
             />
           ) : null}
           <Button
-            label="Discard and retake"
+            label={
+              candidate.capture.source === "photo_library"
+                ? "Choose another"
+                : "Retake"
+            }
             icon="refresh"
             variant="ghost"
             disabled={busy}
             onPress={() => {
-              void retake();
+              if (candidate.capture.source === "photo_library")
+                void choosePhoto();
+              else void retake();
             }}
           />
         </>
@@ -1238,31 +1276,16 @@ export default function CaptureRoute() {
           >
             {error}
           </Text>
-          {photoPermissionBlocked ? (
-            <Button
-              label="Open device settings"
-              variant="ghost"
-              onPress={() => {
-                void Linking.openSettings();
-              }}
-            />
-          ) : null}
         </View>
       ) : null}
     </Screen>
   );
 }
 
-function calibratedScale(capture: CaptureRecord): number | null {
-  return capture.calibration?.status === "valid"
-    ? capture.calibration.millimetersPerPixel
-    : null;
-}
-
 const styles = StyleSheet.create({
   cameraShell: {
     flex: 1,
-    minHeight: 390,
+    minHeight: 420,
     borderRadius: 16,
     overflow: "hidden",
   },
@@ -1282,8 +1305,8 @@ const styles = StyleSheet.create({
     left: 0,
     alignItems: "center",
     justifyContent: "center",
-    padding: 18,
-    gap: 18,
+    padding: 12,
+    gap: 8,
   },
   ghostLayer: {
     position: "absolute",
@@ -1338,6 +1361,9 @@ const styles = StyleSheet.create({
     textTransform: "capitalize",
   },
   captureOptions: { gap: 8 },
+  secondaryActions: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  secondaryAction: { flexGrow: 1, minWidth: 120 },
+  reviewInstruction: { fontSize: 16, lineHeight: 23 },
   mirroredOverlay: { transform: [{ scaleX: -1 }] },
   reason: { fontSize: 13, lineHeight: 19, fontWeight: "700" },
   error: { textAlign: "center", fontSize: 13, fontWeight: "700" },

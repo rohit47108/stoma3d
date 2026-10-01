@@ -600,6 +600,7 @@ export function OralObservationMap({
   const [view, setView] = useState<ObservationMapView>("whole");
   const [tissueTranslucent, setTissueTranslucent] = useState(false);
   const [showTeeth, setShowTeeth] = useState(true);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [renderUnavailable, setRenderUnavailable] = useState(false);
   const [renderAttempt, setRenderAttempt] = useState(0);
   const isWide = width >= 700;
@@ -698,7 +699,7 @@ export function OralObservationMap({
               { color: theme.text, fontSize: 17 * theme.fontScale },
             ]}
           >
-            Personalized observation surface
+            Oral observation map
           </Text>
           <Text
             style={[
@@ -709,8 +710,7 @@ export function OralObservationMap({
               },
             ]}
           >
-            Your captures set coverage, confidence shading, and confirmed pin
-            locations. The anatomy remains a standard map—not a digital twin.
+            Eight regions, with your saved photos and confirmed observations.
           </Text>
         </View>
         <View
@@ -727,81 +727,97 @@ export function OralObservationMap({
         </View>
       </View>
 
-      <View style={styles.toolbarGroup}>
-        <Text style={[styles.toolbarLabel, { color: theme.secondaryText }]}>
-          View
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={
+          optionsOpen ? "Hide map options" : "More map options"
+        }
+        accessibilityState={{ expanded: optionsOpen }}
+        onPress={() => setOptionsOpen((value) => !value)}
+        style={styles.mapOptionsToggle}
+      >
+        <Text style={[styles.toolbarLabel, { color: theme.primary }]}>
+          {optionsOpen ? "Hide map options" : "More map options"}
         </Text>
-        <View accessibilityRole="tablist" style={styles.segmentRow}>
-          <SegmentButton
-            label="Whole"
-            icon="cube-outline"
-            selected={view === "whole"}
-            onPress={() => selectView("whole")}
-          />
-          <SegmentButton
-            label="Exploded"
-            icon="expand-outline"
-            selected={view === "exploded"}
-            onPress={() => selectView("exploded")}
-          />
-          <SegmentButton
-            label="Focus"
-            icon="locate-outline"
-            selected={view === "focus"}
-            onPress={() => selectView("focus")}
-          />
-          <SegmentButton
-            label="Scan path"
-            icon="navigate-outline"
-            selected={view === "path"}
-            onPress={() => selectView("path")}
-          />
-        </View>
-      </View>
+      </Pressable>
+      {optionsOpen ? (
+        <>
+          <View style={styles.toolbarGroup}>
+            <Text style={[styles.toolbarLabel, { color: theme.secondaryText }]}>
+              View
+            </Text>
+            <View accessibilityRole="tablist" style={styles.segmentRow}>
+              <SegmentButton
+                label="Whole"
+                icon="cube-outline"
+                selected={view === "whole"}
+                onPress={() => selectView("whole")}
+              />
+              <SegmentButton
+                label="Exploded"
+                icon="expand-outline"
+                selected={view === "exploded"}
+                onPress={() => selectView("exploded")}
+              />
+              <SegmentButton
+                label="Focus"
+                icon="locate-outline"
+                selected={view === "focus"}
+                onPress={() => selectView("focus")}
+              />
+              <SegmentButton
+                label="Scan path"
+                icon="navigate-outline"
+                selected={view === "path"}
+                onPress={() => selectView("path")}
+              />
+            </View>
+          </View>
 
-      <View style={styles.toolbarGroup}>
-        <Text style={[styles.toolbarLabel, { color: theme.secondaryText }]}>
-          Map layer
-        </Text>
-        <View accessibilityRole="tablist" style={styles.layerRow}>
-          <LayerButton
-            label="Capture coverage"
-            selected={layer === "coverage"}
-            onPress={() => setLayer("coverage")}
-          />
-          <LayerButton
-            label="Scan status"
-            selected={layer === "status"}
-            onPress={() => setLayer("status")}
-          />
-          <LayerButton
-            label="Analysis confidence"
-            selected={layer === "confidence"}
-            onPress={() => setLayer("confidence")}
-          />
-        </View>
-      </View>
+          <View style={styles.toolbarGroup}>
+            <Text style={[styles.toolbarLabel, { color: theme.secondaryText }]}>
+              Map layer
+            </Text>
+            <View accessibilityRole="tablist" style={styles.layerRow}>
+              <LayerButton
+                label="Capture coverage"
+                selected={layer === "coverage"}
+                onPress={() => setLayer("coverage")}
+              />
+              <LayerButton
+                label="Scan status"
+                selected={layer === "status"}
+                onPress={() => setLayer("status")}
+              />
+              <LayerButton
+                label="Analysis confidence"
+                selected={layer === "confidence"}
+                onPress={() => setLayer("confidence")}
+              />
+            </View>
+          </View>
 
-      <View style={styles.toolbarGroup}>
-        <Text style={[styles.toolbarLabel, { color: theme.secondaryText }]}>
-          Anatomy display
-        </Text>
-        <View style={styles.displayRow}>
-          <DisplayToggle
-            label="See through tissue"
-            icon="layers-outline"
-            checked={tissueTranslucent}
-            onPress={() => setTissueTranslucent((value) => !value)}
-          />
-          <DisplayToggle
-            label="Show teeth"
-            icon="eye-outline"
-            checked={showTeeth}
-            onPress={() => setShowTeeth((value) => !value)}
-          />
-        </View>
-      </View>
-
+          <View style={styles.toolbarGroup}>
+            <Text style={[styles.toolbarLabel, { color: theme.secondaryText }]}>
+              Anatomy display
+            </Text>
+            <View style={styles.displayRow}>
+              <DisplayToggle
+                label="See through tissue"
+                icon="layers-outline"
+                checked={tissueTranslucent}
+                onPress={() => setTissueTranslucent((value) => !value)}
+              />
+              <DisplayToggle
+                label="Show teeth"
+                icon="eye-outline"
+                checked={showTeeth}
+                onPress={() => setShowTeeth((value) => !value)}
+              />
+            </View>
+          </View>
+        </>
+      ) : null}
       <View
         accessible={false}
         style={[
@@ -1397,6 +1413,7 @@ function MapControlLight({
 }
 
 const styles = StyleSheet.create({
+  mapOptionsToggle: { minHeight: 48, justifyContent: "center" },
   container: { gap: 12 },
   introContainer: {
     borderWidth: 1,

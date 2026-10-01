@@ -69,7 +69,7 @@ environment:
 
 ```text
 EXPO_PUBLIC_INFERENCE_URL=https://stoma3d-inference.vercel.app/api
-EXPO_PUBLIC_RESPONSE_SIGNING_PUBLIC_KEY_B64=O1GBNCptNbSyxbsWBSCdlkSWK9+lY7KJKW2J41h7+98=
+EXPO_PUBLIC_RESPONSE_SIGNING_PUBLIC_KEY_B64=52Fs9oXU4tUX7yIFi22hHZDkCA0waE2KutGo3VIWYzU=
 EXPO_PUBLIC_PLATFORM_URL=https://api.example.org
 EXPO_PUBLIC_OIDC_ISSUER=https://example.us.auth0.com
 EXPO_PUBLIC_OIDC_CLIENT_ID=replace-with-public-native-client-id

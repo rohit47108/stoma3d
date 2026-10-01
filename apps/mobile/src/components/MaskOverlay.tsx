@@ -14,9 +14,14 @@ import { useAppTheme } from "@/theme";
 interface MaskOverlayProps {
   imageUri: string | null;
   mask: CandidateMask | null;
+  showMask?: boolean;
 }
 
-export function MaskOverlay({ imageUri, mask }: MaskOverlayProps) {
+export function MaskOverlay({
+  imageUri,
+  mask,
+  showMask = true,
+}: MaskOverlayProps) {
   const theme = useAppTheme();
   const [size, setSize] = useState({ width: 1, height: 1 });
   const [imageAspectRatio, setImageAspectRatio] = useState(4 / 3);
@@ -38,7 +43,7 @@ export function MaskOverlay({ imageUri, mask }: MaskOverlayProps) {
     <View
       accessible
       accessibilityLabel={
-        mask
+        mask && showMask
           ? "Captured image with an approximate candidate outline."
           : "Captured image. No candidate outline available."
       }
@@ -65,16 +70,18 @@ export function MaskOverlay({ imageUri, mask }: MaskOverlayProps) {
           Protected image preview unavailable
         </Text>
       ) : null}
-      {path ? (
+      {path && showMask ? (
         <Canvas pointerEvents="none" style={StyleSheet.absoluteFill}>
           <Path path={path} color="rgba(255,205,74,0.28)" style="fill" />
           <Path path={path} color="#FFCD4A" style="stroke" strokeWidth={4} />
         </Canvas>
       ) : null}
-      <View style={styles.key}>
-        <View style={styles.keyLine} />
-        <Text style={styles.keyText}>Approximate candidate boundary</Text>
-      </View>
+      {mask && showMask ? (
+        <View style={styles.key}>
+          <View style={styles.keyLine} />
+          <Text style={styles.keyText}>Approximate candidate boundary</Text>
+        </View>
+      ) : null}
     </View>
   );
 }

@@ -13,41 +13,62 @@ export interface ImageTelemetry {
   width?: number;
   height?: number;
   byteSize?: number;
+  measurementStatus?: "measured" | "unavailable";
+  processingError?: string;
+  wellExposedFraction?: number;
 }
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
 export function evaluateImageTelemetry(
   telemetry: ImageTelemetry,
+  policy: "strict" | "advisory" = "strict",
 ): QualityResult {
   // The focus-variance reference was selected on licensed SMART-OM
   // train/validation images and deliberately blurred copies. The legacy edge
   // score remains a fallback for persisted telemetry created before this field
   // existed.
-  const blurScore = clamp(
-    telemetry.focusVariance === undefined
-      ? telemetry.edgeStrength / 0.18
-      : telemetry.focusVariance / 0.015,
-  );
-  const exposureScore = clamp(
-    1 - Math.abs(telemetry.meanLuminance - 0.55) / 0.55,
-  );
-  const glareScore = clamp(telemetry.highlightFraction / 0.2);
-  const obstructionScore = clamp(telemetry.obstructionEstimate);
+  const unavailable = telemetry.measurementStatus === "unavailable";
+  const standardized = telemetry.measurementStatus === "measured";
+  const blurScore = unavailable
+    ? 0.5
+    : clamp(
+        standardized && telemetry.focusVariance !== undefined
+          ? 1 - Math.exp(-(telemetry.focusVariance * 255 * 255) / 180)
+          : telemetry.focusVariance === undefined
+            ? telemetry.edgeStrength / 0.18
+            : telemetry.focusVariance / 0.015,
+      );
+  const exposureScore = unavailable
+    ? 0.5
+    : clamp(
+        standardized && telemetry.wellExposedFraction !== undefined
+          ? telemetry.wellExposedFraction
+          : 1 - Math.abs(telemetry.meanLuminance - 0.55) / 0.55,
+      );
+  const glareScore = unavailable
+    ? 0
+    : clamp(
+        standardized
+          ? telemetry.highlightFraction
+          : telemetry.highlightFraction / 0.2,
+      );
+  const obstructionScore = unavailable
+    ? 0
+    : clamp(telemetry.obstructionEstimate);
   const reasons: string[] = [];
 
-  if (!telemetry.stable)
-    reasons.push("Hold the phone still until the stability ring fills.");
   if (
     telemetry.width !== undefined &&
     telemetry.height !== undefined &&
-    Math.min(telemetry.width, telemetry.height) < 480
+    Math.min(telemetry.width, telemetry.height) <
+      (policy === "advisory" || standardized ? 128 : 480)
   ) {
-    reasons.push(
-      "The image resolution is too low. Use an image that is at least 480 pixels on its shortest side.",
-    );
+    reasons.push("The photo is too small. Choose a larger image.");
   }
   if (
+    policy === "strict" &&
+    !standardized &&
     telemetry.width !== undefined &&
     telemetry.height !== undefined &&
     telemetry.height > 0
@@ -67,17 +88,34 @@ export function evaluateImageTelemetry(
       "The sanitized image is larger than the protected upload-size limit.",
     );
   }
-  if (blurScore < 0.42)
+  if (
+    policy === "strict" &&
+    !unavailable &&
+    blurScore < (standardized ? 0.054 : 0.42)
+  )
     reasons.push("The image looks blurry. Move slightly back and hold still.");
-  if (exposureScore < 0.45) {
+  if (
+    policy === "strict" &&
+    !unavailable &&
+    exposureScore < (standardized ? 0.65 : 0.45)
+  ) {
     reasons.push(
       telemetry.meanLuminance < 0.3
         ? "The area is too dark."
         : "The area is too bright.",
     );
   }
-  if (glareScore > 0.55) reasons.push("Tilt the phone to reduce glare.");
-  if (obstructionScore > 0.5)
+  if (
+    policy === "strict" &&
+    !unavailable &&
+    glareScore > (standardized ? 0.15 : 0.55)
+  )
+    reasons.push("Tilt the phone to reduce glare.");
+  if (
+    policy === "strict" &&
+    !unavailable &&
+    obstructionScore > (standardized ? 0.2 : 0.5)
+  )
     reasons.push("The target appears partly blocked.");
   if (telemetry.faceDetected)
     reasons.push(

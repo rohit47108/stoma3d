@@ -5,7 +5,10 @@ import {
   DISCLAIMER,
 } from "@stoma3d/contracts";
 
-import { captureStorageRejectionReasons } from "../src/lib/analysisPolicy";
+import {
+  captureAnalysisRetryDisposition,
+  captureStorageRejectionReasons,
+} from "../src/lib/analysisPolicy";
 
 function analysis(
   overrides: {
@@ -14,6 +17,7 @@ function analysis(
     selectedRegionMatches?: boolean;
     predictedRegion?: "left_buccal_mucosa" | "dorsal_tongue" | null;
     status?: "complete" | "abstained" | "unsupported" | "failed";
+    analysisOrigin?: "live_model" | "unavailable";
   } = {},
 ) {
   return analysisResultSchema.parse({
@@ -53,7 +57,7 @@ function analysis(
     abstentionReasons: [],
     modelVersions: { anatomy: "test" },
     inputOrigin: "live_capture",
-    analysisOrigin: "live_model",
+    analysisOrigin: overrides.analysisOrigin ?? "live_model",
     status:
       overrides.status ??
       (overrides.qualityAccepted === false ||
@@ -91,12 +95,60 @@ describe("protected capture storage acceptance", () => {
     expect(
       captureStorageRejectionReasons(
         analysis({
-          anatomySupported: false,
-          predictedRegion: null,
           status: "abstained",
         }),
         "left_buccal_mucosa",
       ),
     ).toEqual([]);
+  });
+
+  it.each(["unsupported", "abstained"] as const)(
+    "does not accept unconfirmed anatomy even when quality passes and analysis is %s",
+    (status) => {
+      expect(
+        captureStorageRejectionReasons(
+          analysis({ anatomySupported: false, predictedRegion: null, status }),
+          "left_buccal_mucosa",
+        ),
+      ).toEqual([
+        "The mouth region could not be confirmed. Choose another photo of this region.",
+      ]);
+    },
+  );
+
+  it("preserves the previous saved result when retry transport is unavailable", () => {
+    expect(
+      captureAnalysisRetryDisposition(
+        analysis({
+          analysisOrigin: "unavailable",
+          anatomySupported: false,
+          predictedRegion: null,
+          status: "failed",
+        }),
+        "left_buccal_mucosa",
+      ),
+    ).toBe("preserve");
+  });
+
+  it("rejects a verified retry response with unsupported anatomy", () => {
+    expect(
+      captureAnalysisRetryDisposition(
+        analysis({
+          anatomySupported: false,
+          predictedRegion: null,
+          status: "unsupported",
+        }),
+        "left_buccal_mucosa",
+      ),
+    ).toBe("reject");
+  });
+
+  it("updates a supported, quality-accepted abstention without claiming a finding", () => {
+    expect(
+      captureAnalysisRetryDisposition(
+        analysis({ status: "abstained" }),
+        "left_buccal_mucosa",
+      ),
+    ).toBe("update");
   });
 });

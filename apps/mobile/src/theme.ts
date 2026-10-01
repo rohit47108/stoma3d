@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AccessibilityInfo, useColorScheme } from "react-native";
+import { AccessibilityInfo } from "react-native";
 
 import { useStoma3DStore } from "@/store/useStoma3DStore";
 
@@ -13,7 +13,7 @@ const light = {
   ink: "#17324D",
   muted: "#536A7C",
   line: "#C9D8E0",
-  canvas: "#F5FAF9",
+  canvas: "#FAFAF7",
   surface: "#FFFFFF",
   white: "#FFFFFF",
   mapPending: "#DCA0A6",
@@ -46,7 +46,9 @@ const dark = {
 
 export function useAppTheme() {
   const settings = useStoma3DStore((state) => state.settings);
-  const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
+  // Keep everyday scanning in the agreed light visual system. High contrast
+  // remains an explicit setting and system text scaling remains enabled.
+  const colorScheme = "light" as "light" | "dark";
   const isDark = colorScheme === "dark";
   const palette = isDark ? dark : light;
   const highContrastPalette = isDark

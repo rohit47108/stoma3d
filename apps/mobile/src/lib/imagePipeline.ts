@@ -1,11 +1,12 @@
-import { Skia } from "@shopify/react-native-skia";
+import { AlphaType, ColorType, Skia } from "@shopify/react-native-skia";
 import * as FileSystem from "expo-file-system/legacy";
-import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { Image as NativeImage } from "react-native";
 
 import { TRANSPORT_IMAGE_BYTE_LIMIT } from "@/constants";
 import { evaluateImageTelemetry, type ImageTelemetry } from "@/lib/quality";
 import { createStoma3DTempUri, removeFileIfPresent } from "@/lib/tempFiles";
+import { telemetryFromRgba } from "@/lib/imageTelemetry";
 
 export interface SanitizedCapture {
   uri: string;
@@ -15,6 +16,8 @@ export interface SanitizedCapture {
   width: number;
   height: number;
   byteSize: number;
+  privacyStatus?: "passed" | "face_detected" | "unavailable";
+  cropped?: boolean;
 }
 
 // Vercel Functions reject a whole request above 4.5 MB. Two comparison images
@@ -36,105 +39,49 @@ function telemetryFromBase64(
   height: number,
   byteSize: number,
 ): ImageTelemetry {
+  let image: ReturnType<typeof Skia.Image.MakeImageFromEncoded> = null;
   try {
-    const image = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(base64));
+    image = Skia.Image.MakeImageFromEncoded(Skia.Data.fromBase64(base64));
     if (!image) throw new Error("Image decode failed");
     const decodedWidth = image.width();
     const decodedHeight = image.height();
-    const reader = image as unknown as {
-      readPixels: () => Uint8Array | Float32Array | null;
-    };
-    const pixels = reader.readPixels();
-    if (!pixels || pixels.length < 16)
-      throw new Error("Image pixels unavailable");
-
-    const scale = pixels instanceof Float32Array ? 1 : 255;
-    const pixelCount = Math.floor(pixels.length / 4);
-    const sampleStep = Math.max(1, Math.ceil(Math.sqrt(pixelCount / 7_000)));
-    let luminanceTotal = 0;
-    let highlights = 0;
-    let dark = 0;
-    let edgeTotal = 0;
-    let edgeSamples = 0;
-    let laplacianTotal = 0;
-    let laplacianSquareTotal = 0;
-    let laplacianSamples = 0;
-    let samples = 0;
-
-    const luminanceAt = (x: number, y: number) => {
-      const offset = (y * decodedWidth + x) * 4;
-      const red = Number(pixels[offset] ?? 0) / scale;
-      const green = Number(pixels[offset + 1] ?? 0) / scale;
-      const blue = Number(pixels[offset + 2] ?? 0) / scale;
-      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-    };
-
-    for (let y = 0; y < decodedHeight; y += sampleStep) {
-      for (let x = 0; x < decodedWidth; x += sampleStep) {
-        const luminance = luminanceAt(x, y);
-        const nextX = x + sampleStep;
-        const nextY = y + sampleStep;
-        if (nextX < decodedWidth) {
-          edgeTotal += Math.abs(luminance - luminanceAt(nextX, y));
-          edgeSamples += 1;
-        }
-        if (nextY < decodedHeight) {
-          edgeTotal += Math.abs(luminance - luminanceAt(x, nextY));
-          edgeSamples += 1;
-        }
-        luminanceTotal += luminance;
-        if (luminance > 0.94) highlights += 1;
-        if (luminance < 0.08) dark += 1;
-        samples += 1;
-      }
-    }
-    for (let y = sampleStep; y + sampleStep < decodedHeight; y += sampleStep) {
-      for (let x = sampleStep; x + sampleStep < decodedWidth; x += sampleStep) {
-        const center = luminanceAt(x, y);
-        const laplacian =
-          4 * center -
-          luminanceAt(x - sampleStep, y) -
-          luminanceAt(x + sampleStep, y) -
-          luminanceAt(x, y - sampleStep) -
-          luminanceAt(x, y + sampleStep);
-        laplacianTotal += laplacian;
-        laplacianSquareTotal += laplacian * laplacian;
-        laplacianSamples += 1;
-      }
-    }
-    const laplacianMean = laplacianTotal / Math.max(1, laplacianSamples);
-    const focusVariance = Math.max(
-      0,
-      laplacianSquareTotal / Math.max(1, laplacianSamples) -
-        laplacianMean * laplacianMean,
-    );
-
-    image.dispose();
-    return {
-      edgeStrength: edgeTotal / Math.max(1, edgeSamples),
-      focusVariance,
-      meanLuminance: luminanceTotal / Math.max(1, samples),
-      highlightFraction: highlights / Math.max(1, samples),
-      obstructionEstimate: Math.min(1, (dark / Math.max(1, samples)) * 1.4),
-      faceDetected: false,
-      stable,
+    // Pin the output format; native Skia defaults differ across devices.
+    // https://shopify.github.io/react-native-skia/docs/images/
+    const pixels = image.readPixels(0, 0, {
       width: decodedWidth,
       height: decodedHeight,
-      byteSize,
-    };
-  } catch {
+      colorType: ColorType.RGBA_8888,
+      alphaType: AlphaType.Unpremul,
+    });
+    if (!(pixels instanceof Uint8Array))
+      throw new Error("Image pixels unavailable");
     return {
-      edgeStrength: 0,
-      focusVariance: 0,
-      meanLuminance: 0,
-      highlightFraction: 0,
-      obstructionEstimate: 1,
+      ...telemetryFromRgba(pixels, decodedWidth, decodedHeight),
       faceDetected: false,
       stable,
       width,
       height,
       byteSize,
     };
+  } catch {
+    // An unavailable measurement is not evidence of blur or darkness.
+    return {
+      edgeStrength: 0,
+      focusVariance: 0,
+      meanLuminance: 0,
+      highlightFraction: 0,
+      obstructionEstimate: 0,
+      faceDetected: false,
+      stable,
+      width,
+      height,
+      byteSize,
+      measurementStatus: "unavailable",
+      processingError:
+        "Photo checks could not run on this device. The service will check the photo before saving it.",
+    };
+  } finally {
+    image?.dispose();
   }
 }
 
@@ -156,28 +103,44 @@ async function sanitizeImageCapture(
   options: {
     stable: boolean;
     source: SanitizedCapture["source"];
+    unmirror?: boolean;
   },
 ): Promise<SanitizedCapture> {
   let manipulatedUri: string | null = null;
   let protectedTempUri: string | null = null;
   try {
     const dimensions = await imageDimensions(uri);
+    if (
+      dimensions.width * dimensions.height > 60_000_000 ||
+      Math.max(dimensions.width, dimensions.height) > 16_384
+    ) {
+      throw new Error(
+        "This photo is too large to open on this device. Choose a smaller copy.",
+      );
+    }
     const sourceLongestEdge = Math.max(dimensions.width, dimensions.height);
-    let output: Awaited<ReturnType<typeof manipulateAsync>> | null = null;
+    let output: {
+      uri: string;
+      width: number;
+      height: number;
+      base64?: string;
+    } | null = null;
     let byteSize = Number.POSITIVE_INFINITY;
     for (const profile of SANITIZATION_PROFILES) {
-      const actions =
-        sourceLongestEdge > profile.longestEdge
-          ? [
-              {
-                resize:
-                  dimensions.width >= dimensions.height
-                    ? { width: profile.longestEdge }
-                    : { height: profile.longestEdge },
-              },
-            ]
-          : [];
-      const candidate = await manipulateAsync(uri, actions, {
+      // Context API performs orientation-aware decoding and creates fresh JPEG
+      // pixels, so the original metadata never enters protected storage.
+      // https://docs.expo.dev/versions/latest/sdk/imagemanipulator/
+      const context = ImageManipulator.manipulate(uri);
+      if (options.unmirror) context.flip("horizontal");
+      if (sourceLongestEdge > profile.longestEdge) {
+        context.resize(
+          dimensions.width >= dimensions.height
+            ? { width: profile.longestEdge }
+            : { height: profile.longestEdge },
+        );
+      }
+      const rendered = await context.renderAsync();
+      const candidate = await rendered.saveAsync({
         compress: profile.compression,
         format: SaveFormat.JPEG,
         base64: true,
@@ -206,16 +169,53 @@ async function sanitizeImageCapture(
     await FileSystem.writeAsStringAsync(protectedTempUri, output.base64, {
       encoding: FileSystem.EncodingType.Base64,
     });
-    const capture = {
-      uri: protectedTempUri,
-      mimeType: "image/jpeg" as const,
-      telemetry: telemetryFromBase64(
-        output.base64,
+    let telemetry: ImageTelemetry;
+    let qualityUri: string | null = null;
+    try {
+      const context = ImageManipulator.manipulate(output.uri);
+      const longest = Math.max(output.width, output.height);
+      if (longest > 512)
+        context.resize(
+          output.width >= output.height ? { width: 512 } : { height: 512 },
+        );
+      const rendered = await context.renderAsync();
+      const measurementImage = await rendered.saveAsync({
+        format: SaveFormat.JPEG,
+        compress: 0.95,
+        base64: true,
+      });
+      qualityUri = measurementImage.uri;
+      if (!measurementImage.base64) throw new Error("Photo pixels unavailable");
+      telemetry = telemetryFromBase64(
+        measurementImage.base64,
         options.stable,
         output.width,
         output.height,
         byteSize,
-      ),
+      );
+    } catch {
+      telemetry = {
+        edgeStrength: 0,
+        meanLuminance: 0,
+        highlightFraction: 0,
+        obstructionEstimate: 0,
+        faceDetected: false,
+        stable: options.stable,
+        width: output.width,
+        height: output.height,
+        byteSize,
+        measurementStatus: "unavailable",
+        processingError:
+          "Photo checks could not run on this device. The service will check the photo before saving it.",
+      };
+    } finally {
+      if (qualityUri && qualityUri !== output.uri)
+        await removeFileIfPresent(qualityUri);
+    }
+    const capture = {
+      uri: protectedTempUri,
+      mimeType: "image/jpeg" as const,
+      telemetry,
       source: options.source,
       width: output.width,
       height: output.height,
@@ -234,8 +234,9 @@ async function sanitizeImageCapture(
 export async function sanitizeCameraCapture(
   uri: string,
   stable: boolean,
+  unmirror = false,
 ): Promise<SanitizedCapture> {
-  return sanitizeImageCapture(uri, { stable, source: "camera" });
+  return sanitizeImageCapture(uri, { stable, source: "camera", unmirror });
 }
 
 export async function sanitizeSelectedImage(
@@ -249,13 +250,45 @@ export async function sanitizeSelectedImage(
 
 export async function sanitizeVideoFrame(
   uri: string,
+  unmirror = false,
 ): Promise<SanitizedCapture> {
   return sanitizeImageCapture(uri, {
     stable: true,
     source: "video_sweep",
+    unmirror,
   });
 }
 
 export function qualityForSanitizedCapture(capture: SanitizedCapture) {
-  return evaluateImageTelemetry(capture.telemetry);
+  return evaluateImageTelemetry(capture.telemetry, "advisory");
+}
+
+export async function editSanitizedCapture(
+  capture: SanitizedCapture,
+  edit: {
+    crop?: { originX: number; originY: number; width: number; height: number };
+    rotate?: number;
+  },
+): Promise<SanitizedCapture> {
+  let editedUri: string | null = null;
+  try {
+    const context = ImageManipulator.manipulate(capture.uri);
+    if (edit.rotate) context.rotate(edit.rotate);
+    if (edit.crop) context.crop(edit.crop);
+    const rendered = await context.renderAsync();
+    const edited = await rendered.saveAsync({
+      format: SaveFormat.JPEG,
+      compress: 0.95,
+    });
+    editedUri = edited.uri;
+    return {
+      ...(await sanitizeImageCapture(edited.uri, {
+        source: capture.source,
+        stable: capture.telemetry.stable,
+      })),
+      cropped: edit.crop !== undefined || capture.cropped === true,
+    };
+  } finally {
+    await removeFileIfPresent(editedUri);
+  }
 }

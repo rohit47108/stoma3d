@@ -44,7 +44,7 @@ AUDITED_FILE_SHA256 = {
         "73c118539f03fa5e54047ecd9f19408d781b1a847be89fe94d18709301d98d90"
     ),
     "apps/mobile/src/components/OralObservationMap.tsx": (
-        "42c5e68380f7efdb21ab114ce7173bb10256d45d14b5dda8c56fdf2b5fc1d586"
+        "9b3e7bf1fe8f12dacd1309fce8a0a9f0e78a7f3c94ed2b3dc7ef6fb07d3568a1"
     ),
     "apps/mobile/assets/stoma3d-adaptive-foreground.png": (
         "0ef561cfc7d2fbcc18be62de2403a709559b4bd995885d7b964b31614e5f4ce3"
@@ -53,7 +53,7 @@ AUDITED_FILE_SHA256 = {
         "279dc14ae6a284ee35758c4ce29d66c3a5b8b83ad686726a2c10688d21a83e91"
     ),
     "assets/mouth/manifest.json": (
-        "c6a2f1fde11896a908b97fab27b65f7c32b0bcdff3deb4aae52cc23f26dbad33"
+        "32c214636eea04e729dafc9adaacd8b5429a066446b359d350c9e8185e875128"
     ),
     "assets/mouth/calibration/stoma3d-calibration-a4.pdf": (
         "2ceff689f42ae25ff3ae0070b41dfa75e4b59b38ca1c0e5352ed2580424432bc"

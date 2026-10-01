@@ -10,16 +10,15 @@ import { useAppTheme } from "@/theme";
 export default function IndexRoute() {
   const theme = useAppTheme();
   const hydrated = useStoma3DStore((state) => state.hydrated);
-  const consentedAt = useStoma3DStore((state) => state.consentedAt);
   useEffect(() => {
     if (!hydrated) return;
-    router.replace(consentedAt ? "/(tabs)/scan" : "/onboarding");
-  }, [consentedAt, hydrated]);
+    router.replace("/(tabs)/home");
+  }, [hydrated]);
 
   return (
     <Screen scroll={false} contentStyle={styles.screen}>
       <View style={[styles.mark, { backgroundColor: theme.primary }]}>
-        <Text style={styles.markText}>OS</Text>
+        <Text style={styles.markText}>S3D</Text>
       </View>
       <Text style={[styles.name, { color: theme.text }]}>{APP_NAME}</Text>
       <Text style={[styles.tagline, { color: theme.secondaryText }]}>
@@ -27,7 +26,7 @@ export default function IndexRoute() {
       </Text>
       <ActivityIndicator color={theme.primary} size="small" />
       <Text style={[styles.loading, { color: theme.secondaryText }]}>
-        Opening protected local workspace…
+        Opening Stoma3D…
       </Text>
     </Screen>
   );

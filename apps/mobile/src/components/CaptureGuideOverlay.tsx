@@ -6,14 +6,18 @@ import { captureGuideSpec } from "@/lib/captureGuide";
 
 interface CaptureGuideOverlayProps {
   region: MouthRegion;
+  mirrored?: boolean;
 }
 
-export function CaptureGuideOverlay({ region }: CaptureGuideOverlayProps) {
+export function CaptureGuideOverlay({
+  region,
+  mirrored = false,
+}: CaptureGuideOverlayProps) {
   const guide = captureGuideSpec(region);
 
   return (
     <View accessible={false} pointerEvents="none" style={styles.container}>
-      <Canvas style={styles.canvas}>
+      <Canvas style={[styles.canvas, mirrored ? styles.mirrored : undefined]}>
         <Path
           path={guide.outlinePath}
           color="rgba(22,125,122,0.18)"
@@ -43,6 +47,7 @@ const styles = StyleSheet.create({
     width: 280,
     height: 190,
   },
+  mirrored: { transform: [{ scaleX: -1 }] },
   cue: {
     position: "absolute",
     bottom: 8,

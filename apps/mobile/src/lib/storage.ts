@@ -21,6 +21,11 @@ import {
 } from "@/lib/normalizedStorageSchema";
 import { deleteProtectedFilesAndRotateKey } from "@/lib/secureFiles";
 import { parsePersistedAppState } from "@/lib/persistedStateSchema";
+import {
+  parseCaptureDrafts,
+  upsertCaptureDraft,
+  type CaptureDraft,
+} from "@/lib/captureDrafts";
 import { assertSqlCipherRuntime } from "@/lib/sqlCipherRuntime";
 import type {
   AccessibilitySettings,
@@ -824,6 +829,57 @@ function queueDatabaseWrite(
     console.warn("[STOMA3D_CLOUD_STORAGE_WRITE_FAILED]");
   });
   return operation;
+}
+
+const CAPTURE_DRAFTS_METADATA_KEY = "capture_drafts_v1";
+
+async function readCaptureDrafts(
+  database: DatabaseConnection,
+): Promise<CaptureDraft[]> {
+  const row = await database.getFirstAsync<MetadataRow>(
+    "SELECT key, value FROM metadata WHERE key = ?",
+    CAPTURE_DRAFTS_METADATA_KEY,
+  );
+  return parseCaptureDrafts(
+    row?.value ? (JSON.parse(row.value) as unknown) : null,
+  );
+}
+
+export async function loadCaptureDrafts(): Promise<CaptureDraft[]> {
+  await writeQueue;
+  return readCaptureDrafts(await getDatabase());
+}
+
+function updateCaptureDrafts(
+  change: (drafts: CaptureDraft[]) => CaptureDraft[],
+): Promise<CaptureDraft[]> {
+  let updated: CaptureDraft[] = [];
+  return queueDatabaseWrite(async (database) => {
+    await database.withTransactionAsync(async () => {
+      updated = parseCaptureDrafts({
+        schemaVersion: 1,
+        drafts: change(await readCaptureDrafts(database)),
+      });
+      await setMetadata(
+        database,
+        CAPTURE_DRAFTS_METADATA_KEY,
+        JSON.stringify({ schemaVersion: 1, drafts: updated }),
+      );
+    });
+  }).then(() => updated);
+}
+
+/** SQLCipher protects draft metadata; photo bytes stay in the existing vault. */
+export function storeCaptureDraft(
+  draft: CaptureDraft,
+): Promise<CaptureDraft[]> {
+  return updateCaptureDrafts((drafts) => upsertCaptureDraft(drafts, draft));
+}
+
+export function deleteStoredCaptureDraft(id: string): Promise<CaptureDraft[]> {
+  return updateCaptureDrafts((drafts) =>
+    drafts.filter((draft) => draft.id !== id),
+  );
 }
 
 /**

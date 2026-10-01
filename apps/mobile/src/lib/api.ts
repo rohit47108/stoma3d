@@ -35,6 +35,7 @@ import {
   verifyResponseSignature,
 } from "@/lib/responseSignature";
 import { enforceApiTransport } from "@/lib/transportSecurity";
+import { requestedHeadsForScan } from "@/lib/modelHeadPolicy";
 
 const REQUEST_TIMEOUT_MS = 18_000;
 
@@ -109,7 +110,7 @@ async function fetchWithTimeout(
     ) {
       throw new ApiRequestError(
         "offline",
-        "No internet connection is available. Your protected image stays on this phone so you can retry.",
+        "You're offline. Your photo is still here. Reconnect and try again.",
       );
     }
   }
@@ -144,7 +145,7 @@ async function fetchWithTimeout(
       if (timedOut) {
         throw new ApiRequestError(
           "timeout",
-          "The analysis request timed out. Your protected image stays on this phone so you can retry.",
+          "Analysis took too long. Your photo is still here. Try again.",
         );
       }
       if (externalSignal?.aborted) throw error;
@@ -277,33 +278,29 @@ export async function analyzeCapture(
   input: AnalyzeCaptureInput,
 ): Promise<AnalysisResult> {
   assertLiveMobileInput(input.inputOrigin);
-  const metadata = analyzeMetadataSchema.parse({
-    contractVersion: CONTRACT_VERSION,
-    captureId: input.captureId,
-    selectedRegion: input.selectedRegion,
-    inputOrigin: input.inputOrigin,
-    requestedHeads: input.requestedHeads ?? [
-      "segmentation",
-      "anatomy",
-      "quality_control",
-      "oral_tissue_segmentation",
-      "out_of_distribution",
-      "secondary_segmentation",
-      "appearance",
-      "disease_research",
-    ],
-    ...(input.calibration ? { calibration: input.calibration } : {}),
-  });
-  const form = new FormData();
-  form.append(
-    "image",
-    uploadPart(input.imageUri),
-    `capture.${input.mimeType === "image/png" ? "png" : "jpg"}`,
-  );
-  form.append("metadata", JSON.stringify(metadata));
-
   const endpoint = apiEndpoint("/v1/analyze");
   try {
+    const card = await fetchModelCard();
+    const metadata = analyzeMetadataSchema.parse({
+      contractVersion: CONTRACT_VERSION,
+      captureId: input.captureId,
+      selectedRegion: input.selectedRegion,
+      inputOrigin: input.inputOrigin,
+      requestedHeads: input.requestedHeads
+        ? input.requestedHeads.filter((head) =>
+            card.enabledHeads.includes(head),
+          )
+        : requestedHeadsForScan(card),
+      ...(input.calibration ? { calibration: input.calibration } : {}),
+    });
+    const form = new FormData();
+    form.append(
+      "image",
+      uploadPart(input.imageUri),
+      `capture.${input.mimeType === "image/png" ? "png" : "jpg"}`,
+    );
+    form.append("metadata", JSON.stringify(metadata));
+
     const { requestId, response } = await fetchWithTimeout(endpoint, {
       method: "POST",
       headers: { Accept: "application/json" },
