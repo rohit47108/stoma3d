@@ -1,13 +1,23 @@
 # Stoma3D
 
-Stoma3D is an iOS and Android app for taking consistent mouth photos and
-tracking visible changes. It is not a diagnostic tool.
+Stoma3D helps you take consistent mouth photos, inspect visible observations,
+and keep a record of changes on iOS, Android, and the web. It is not a diagnostic
+tool.
 
-The normal user flow accepts a camera image or a photo selected from the device,
-removes metadata, checks image quality, asks the user to confirm privacy and the
-selected mouth region, encrypts accepted data locally, calls a stateless analysis
-service, saves the signed response, and makes the observation available in history
-and a local PDF report.
+The scan flow is Home → Start or resume scan → Brief intake → Capture or upload
+→ Review photo → Analysis → Results and 3D map. A standard scan keeps one accepted
+photo for each of the eight mouth regions. You do not choose a model, protocol,
+or physical scale during setup.
+
+The app re-encodes photos without metadata, checks privacy and quality, verifies
+the analysis response, and encrypts saved records on the device. A front/back
+camera switch and saved-photo upload share the same review and analysis path.
+The base 3D map opens before you finish a scan or connect to the analysis service.
+
+The browser workspace is `/scan`; it does not require an account. Guest records
+stay in encrypted IndexedDB storage on that browser. Cloud sync is a separate,
+optional setup. See the [October usability verification record](docs/release/USABILITY_VERIFICATION_2026-10-01.md)
+for completed checks and outstanding phone tests.
 
 The installed app contains no sample mouth images and does not replace a failed
 analysis with a made-up result. A disabled backend fixture exists only for
@@ -18,12 +28,12 @@ service and contract tests.
 
 ## What works now
 
-- Consent and symptom intake for every new scan
+- Home, Scan, 3D Map, and History navigation with brief consent and symptom intake
 - The fixed eight-region mouth capture workflow
-- Camera and saved-photo input, review, retake, and manual region/privacy
-  confirmation
-- IMU stability guidance when the device supports it
-- Local focus, exposure, glare, obstruction, size, and aspect-ratio checks
+- Front camera by default, front/back switching, and saved-photo input
+- Shared photo review, crop, rotate, retake, and region/privacy confirmation
+- Stability and tilt guidance when the device supports it
+- Local photo guidance with final quality and anatomy acceptance from the service
 - Server-side image decoding, metadata stripping, face detection, and quality checks
 - A released eight-region anatomy model that rejects mismatched mouth regions
 - A released segmentation model that outlines one possible visible candidate
@@ -36,6 +46,14 @@ service and contract tests.
 - A two-step longitudinal flow: gated re-identification suggestion, mandatory
   user review, then confidence-gated ORB/RANSAC comparison
 - A local clinician-discussion PDF after all eight regions have accepted captures
+- Account-free browser scanning, partial results, an interactive map, and a
+  printable observation report
+- Encrypted mobile retry drafts after local quality and privacy checks pass;
+  interrupted analysis does not require another photo
+
+These features are implemented in the current source. Local browser tests used
+real, licensed mouth images and the deployed analysis service. The updated web
+release and physical-phone camera checks are still pending in the dated record.
 
 An image can count toward scan coverage after quality acceptance, explicit user
 confirmation, and a matching anatomy result. Candidate outlining runs only when
@@ -72,15 +90,17 @@ future model can run only when its exact artifact, preprocessing contract,
 metrics, review evidence, and release state validate. Missing or invalid evidence
 causes an abstention.
 
-See [implementation status](docs/IMPLEMENTATION_STATUS.md) for the exact remaining
-external evidence and physical-device tests. The completed local checks are in
-[final verification](docs/FINAL_VERIFICATION.md), and the original-plan audit is
-in [requirement audit](docs/REQUIREMENT_AUDIT.md).
+The [October usability verification record](docs/release/USABILITY_VERIFICATION_2026-10-01.md)
+tracks this implementation. Earlier snapshots remain in
+[implementation status](docs/IMPLEMENTATION_STATUS.md),
+[final verification](docs/FINAL_VERIFICATION.md), and the
+[original-plan requirement audit](docs/REQUIREMENT_AUDIT.md); those documents are
+not evidence that every October change has been tested or deployed.
 
 ## Repository
 
 - `apps/mobile`: Expo and React Native application
-- `apps/web`: public, patient, clinician, and administrator Next.js product
+- `apps/web`: public pages, guest scans, and optional account-enabled Next.js views
 - `packages/contracts`: canonical TypeScript schemas and cross-field safety rules
 - `services/inference`: stateless FastAPI, OpenCV, signing, and model-release service
 - `services/platform-api`: accounts, sync, storage, sharing, review, jobs,
@@ -111,9 +131,7 @@ Requirements:
 From the repository root:
 
 ```powershell
-# Run this once after extracting the ZIP if the folder is not already a Git repository.
-git init
-
+Set-Location C:\Users\rohit\Projects\oralsight
 corepack enable
 pnpm install --frozen-lockfile
 pnpm test
@@ -161,6 +179,22 @@ $env:EXPO_PUBLIC_INFERENCE_URL = "http://127.0.0.1:8000"
 pnpm dev:mobile
 ```
 
+To run the browser workspace against the deployed inference service, set these
+values in the web development process:
+
+```powershell
+$env:STOMA3D_WEB_MODE = "public"
+$env:NEXT_PUBLIC_SITE_URL = "http://localhost:3000"
+$env:STOMA3D_INFERENCE_URL = "https://stoma3d-inference.vercel.app/api"
+$env:STOMA3D_RESPONSE_SIGNING_PUBLIC_KEY_B64 = `
+  "52Fs9oXU4tUX7yIFi22hHZDkCA0waE2KutGo3VIWYzU="
+pnpm --filter @stoma3d/web dev
+```
+
+Open [the local scan workspace](http://localhost:3000/scan). The public key is
+safe to publish; it verifies responses and cannot sign them. The guest relay
+requires signed responses even when its inference destination is loopback.
+
 This app requires a development build; Expo Go is not enough for SQLCipher and the
 other native modules. On Android hardware, `adb reverse tcp:8000 tcp:8000` lets the
 phone use the loopback URL. A physical iPhone needs an HTTPS service endpoint.
@@ -184,9 +218,12 @@ The native app is distributed as an Android or iOS build, not as a Vercel websit
 Vercel can host the Next.js web product and the stateless OpenCV inference API.
 The account API and continuous worker are stateful container services and are not
 replaced by Vercel. The signed inference release is live at
-`https://stoma3d-inference.vercel.app/api`. The web deployment proxies its public
-API routes to that service; the platform and worker remain separate container
-deployments.
+[the inference health endpoint](https://stoma3d-inference.vercel.app/api/healthz).
+Guest browser scans use `POST /api/scan/analyze`, a server-only relay to that
+service. It verifies the original signed response bytes and checks the shared
+schema before returning a result. The relay selects released heads from the
+signed model card; visitors do not select models. The platform and worker remain
+separate container deployments.
 
 The supplied Vercel configurations keep the web and inference releases separate.
 The mobile/API pipeline caps each image at 1.75 MB so two-image comparisons fit
@@ -213,7 +250,8 @@ requirements are documented in
   pass.
 - A failed live request never receives a fixture result.
 - Measurements are image-normalized unless a versioned reference-card calibration
-  passes; calibrated millimeter values remain clearly labeled approximate estimates.
+  passed for a historical capture. Ordinary new scans have no scale-card control
+  or millimeter measurement. Historical calibrated records retain their context.
 - Passing software tests does not establish clinical accuracy, regulatory status,
   effectiveness, or HIPAA compliance.
 

@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
-const PRODUCT_PREFIXES = ["/app", "/clinician", "/shared", "/signin"];
+const PRODUCT_PREFIXES = ["/app", "/scan", "/clinician", "/shared", "/signin"];
 
 export function SiteChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();

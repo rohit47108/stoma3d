@@ -1,14 +1,12 @@
 import Link from "next/link";
 
 import { primaryNavigation } from "@/content/site";
-import { hostedWorkspaceEnabled } from "@/lib/production-env";
 
 import { BrandMark } from "./brand-mark";
 
 export function SiteHeader() {
-  const workspaceEnabled = hostedWorkspaceEnabled();
-  const actionHref = workspaceEnabled ? "/signin" : "/how-it-works#start";
-  const actionLabel = workspaceEnabled ? "Open Stoma3D" : "Explore the scan";
+  const actionHref = "/scan";
+  const actionLabel = "Open Stoma3D";
   return (
     <header className="site-header">
       <div className="site-header__inner page-width">

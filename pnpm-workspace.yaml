@@ -31,6 +31,10 @@ patchedDependencies:
   "@infinitered/react-native-mlkit-face-detection@5.0.0": patches/react-native-mlkit-face-detection-5.0.0.patch
   image-size@1.2.1: patches/image-size@1.2.1.patch
 
+# Keep the security patch available if an optional Expo dependency brings this
+# version back; current lockfile does not install image-size 1.2.1.
+allowUnusedPatches: true
+
 overrides:
   "brace-expansion@>=4.0.0 <5.0.9": 5.0.9
   esbuild: 0.28.1

@@ -47,8 +47,8 @@ export default function HomePage() {
             timeline and shareable report.
           </p>
           <div className="hero-actions">
-            <Link className="button" href="/how-it-works#start">
-              See how to start
+            <Link className="button" href="/scan">
+              Start scan
             </Link>
             <Link className="arrow-link" href="/for-professionals">
               For professionals <Arrow />

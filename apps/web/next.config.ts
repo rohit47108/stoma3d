@@ -12,7 +12,7 @@ const securityHeaders = [
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   {
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+    value: "camera=(self), microphone=(), geolocation=(), browsing-topics=()",
   },
   ...(process.env.NODE_ENV === "production"
     ? [
@@ -51,6 +51,8 @@ const nextConfig: NextConfig = {
         "/clinician/:path*",
         "/shared/:path*",
         "/api/shared/:path*",
+        "/scan/:path*",
+        "/api/scan/:path*",
       ].map((source) => ({ source, headers: privateHeaders })),
     ];
   },
