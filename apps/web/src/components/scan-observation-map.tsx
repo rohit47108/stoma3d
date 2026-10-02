@@ -10,11 +10,13 @@ import type {
   Scene,
   PerspectiveCamera,
 } from "three";
+import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   WEB_MAP_MESHES,
   WEB_REGION_POSITIONS,
   WEB_REGION_SCALES,
   webPinPosition,
+  zoomWebObservationMap,
 } from "@/lib/web-observation-map";
 import type { GuestPin } from "@/lib/guest-scan";
 
@@ -28,6 +30,7 @@ interface MapRuntime {
   renderer: WebGLRenderer;
   scene: Scene;
   camera: PerspectiveCamera;
+  controls: OrbitControls;
   regions: Map<MouthRegion, Mesh>;
   pins: Group;
   draw: () => void;
@@ -154,6 +157,7 @@ export function ScanObservationMap({
           renderer,
           scene,
           camera,
+          controls,
           regions,
           pins: pinGroup,
           draw,
@@ -266,10 +270,10 @@ export function ScanObservationMap({
     });
   }, [completed, selected, pins, state]);
 
-  function zoom(direction: number) {
+  function zoom(direction: 1 | -1) {
     const map = runtime.current;
     if (!map) return;
-    map.camera.position.multiplyScalar(direction > 0 ? 0.9 : 1.1);
+    zoomWebObservationMap(map.camera, map.controls, direction);
     map.draw();
   }
 

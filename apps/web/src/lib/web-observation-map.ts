@@ -1,4 +1,6 @@
 import type { MouthRegion } from "@stoma3d/contracts";
+import type { PerspectiveCamera } from "three";
+import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import asset from "../../../../assets/mouth/manifest.json";
 import type { GuestPin } from "./guest-scan";
 
@@ -45,4 +47,19 @@ export function webPinPosition(pin: GuestPin): [number, number, number] {
     base[1] + (0.5 - pin.uvY) * scale[1] * 0.65,
     base[2] + 0.35 + scale[2] * 0.25,
   ];
+}
+
+export function zoomWebObservationMap(
+  camera: PerspectiveCamera,
+  controls: OrbitControls,
+  direction: 1 | -1,
+): void {
+  const offset = camera.position.clone().sub(controls.target);
+  offset
+    .multiplyScalar(direction > 0 ? 0.9 : 1.1)
+    .clampLength(controls.minDistance, controls.maxDistance);
+  camera.position.copy(controls.target).add(offset);
+  // Manual camera transforms must update the orbit state before rendering.
+  // https://threejs.org/docs/pages/OrbitControls.html
+  controls.update();
 }
