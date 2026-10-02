@@ -7,6 +7,7 @@ import {
   analysisOriginLabel,
   inputOriginLabel,
 } from "@/lib/analysis-provenance";
+import { visualDescriptorDescriptions } from "@/lib/visual-descriptor-descriptions";
 
 interface Props {
   capture: GuestCapture;
@@ -94,34 +95,15 @@ export function ScanResult({
                 <dt>Approximate area</dt>
                 <dd>{(mask.normalizedArea * 100).toFixed(1)}% of the photo</dd>
               </div>
-              {result.descriptors && (
-                <>
-                  <div>
-                    <dt>Color</dt>
-                    <dd>
-                      {result.descriptors.meanRedness > 0.6
-                        ? "Redder tone"
-                        : "Mixed tissue tone"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Border</dt>
-                    <dd>
-                      {result.descriptors.borderIrregularity > 1.5
-                        ? "Uneven outline"
-                        : "Relatively even outline"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Texture</dt>
-                    <dd>
-                      {result.descriptors.textureContrast > 0.3
-                        ? "More varied surface texture"
-                        : "More even surface texture"}
-                    </dd>
-                  </div>
-                </>
-              )}
+              {result.descriptors &&
+                visualDescriptorDescriptions(result.descriptors).map(
+                  ({ label, description }) => (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{description}</dd>
+                    </div>
+                  ),
+                )}
             </dl>
             <button
               type="button"

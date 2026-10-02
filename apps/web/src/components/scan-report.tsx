@@ -9,6 +9,7 @@ import {
   regionDetail,
   type GuestSession,
 } from "@/lib/guest-scan";
+import { visualDescriptorDescriptions } from "@/lib/visual-descriptor-descriptions";
 
 export function ScanReport({ session }: { session: GuestSession | null }) {
   if (!session) return null;
@@ -77,6 +78,14 @@ export function ScanReport({ session }: { session: GuestSession | null }) {
               ? `Candidate area: approximately ${(capture.analysis.candidateMask.normalizedArea * 100).toFixed(1)}% of the image. ${session.pins.some((pin) => pin.captureId === capture.id) ? "Observation confirmed by user." : "Not confirmed by user."}`
               : captureSummary(capture)}
           </p>
+          {capture.analysis.descriptors && (
+            <p>
+              {visualDescriptorDescriptions(capture.analysis.descriptors)
+                .map(({ label, description }) => `${label}: ${description}`)
+                .join(". ")}
+              .
+            </p>
+          )}
           <p>
             Input: {inputOriginLabel(capture.analysis.inputOrigin)}. Analysis:{" "}
             {analysisOriginLabel(capture.analysis.analysisOrigin)} ·{" "}
