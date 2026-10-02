@@ -14,6 +14,7 @@ import {
   confirmGuestObservation,
   guestSessionSchema,
   addGuestCapture,
+  resultProblem,
 } from "./guest-scan";
 import { fittedImageSize, validatePhotoFile } from "./scan-image";
 import { encryptGuestRecord, decryptGuestRecord } from "./guest-storage";
@@ -107,6 +108,20 @@ describe("guest scanning", () => {
     expect(() => addGuestCapture(session, wrongId)).toThrow();
   });
 
+  it.each(["ventral_tongue", null] as const)(
+    "rejects a contradictory or missing predicted region (%s) even when the match flag is true",
+    (predictedRegion) => {
+      const session = createGuestSession("scan-1", "2026-10-01T12:00:00.000Z");
+      const capture = testCapture("dorsal_tongue");
+      capture.analysis.anatomyPrediction.region = predictedRegion;
+
+      expect(() => addGuestCapture(session, capture)).toThrow(
+        "matching anatomy",
+      );
+      expect(guestCompletedRegions(session)).toEqual([]);
+    },
+  );
+
   it("completes at eight accepted regions and replaces rather than duplicates a region", () => {
     let session = createGuestSession("scan-1", "2026-10-01T12:00:00.000Z");
     for (const region of MOUTH_REGIONS)
@@ -121,6 +136,80 @@ describe("guest scanning", () => {
       session.captures.find((item) => item.region === "dorsal_tongue")?.id,
     ).toBe("replacement");
   });
+});
+
+describe("photo correction instructions", () => {
+  function rejectedPhoto(reasons: string[]): AnalysisResult {
+    const result = testCapture().analysis;
+    result.status = "abstained";
+    result.quality.accepted = false;
+    result.quality.reasons = reasons;
+    result.abstentionReasons = [...reasons];
+    return result;
+  }
+
+  it("asks for better lighting before focus when a dark photo fails both checks", () => {
+    expect(
+      resultProblem(
+        rejectedPhoto(["image_too_blurry", "exposure_out_of_range"]),
+      ),
+    ).toBe("Use even lighting and try another photo.");
+  });
+
+  it.each([
+    ["image_too_small", "Choose a higher-resolution photo or take a new one."],
+    ["excessive_glare", "Move away from direct light and try another photo."],
+    [
+      "image_obstructed",
+      "Keep the mouth clear of fingers and other objects, then try again.",
+    ],
+    [
+      "image_too_blurry",
+      "The photo is out of focus. Hold still and take another.",
+    ],
+    ["exposure_out_of_range", "Use even lighting and try another photo."],
+  ])("gives a specific correction for %s", (reason, message) => {
+    expect(resultProblem(rejectedPhoto([reason]))).toBe(message);
+  });
+
+  it("prioritizes a small source image over unreliable lighting and focus readings", () => {
+    expect(
+      resultProblem(
+        rejectedPhoto([
+          "image_too_small",
+          "image_too_blurry",
+          "exposure_out_of_range",
+        ]),
+      ),
+    ).toBe("Choose a higher-resolution photo or take a new one.");
+  });
+
+  it("explains a small image when the privacy detector cannot run at that size", () => {
+    expect(
+      resultProblem(
+        rejectedPhoto(["image_too_small", "face_check_unavailable"]),
+      ),
+    ).toBe("Choose a higher-resolution photo or take a new one.");
+  });
+
+  it("keeps a detected face correction ahead of image-quality instructions", () => {
+    const result = rejectedPhoto(["image_too_blurry", "exposure_out_of_range"]);
+    result.quality.faceDetected = true;
+    expect(resultProblem(result)).toBe(
+      "Crop the photo to show only the mouth, then try again.",
+    );
+  });
+
+  it.each(["face_check_unavailable", "privacy_check_unavailable"])(
+    "keeps %s distinct from image-quality problems",
+    (reason) => {
+      expect(
+        resultProblem(
+          rejectedPhoto([reason, "image_too_blurry", "exposure_out_of_range"]),
+        ),
+      ).toBe("The photo privacy check could not finish. Try again.");
+    },
+  );
 });
 
 describe("browser image preparation", () => {

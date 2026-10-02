@@ -26,6 +26,7 @@ export const guestCaptureSchema = z
       capture.analysis.region !== capture.region ||
       !capture.analysis.quality.accepted ||
       !capture.analysis.anatomyPrediction.supported ||
+      capture.analysis.anatomyPrediction.region !== capture.region ||
       !capture.analysis.anatomyPrediction.selectedRegionMatches ||
       !["complete", "abstained"].includes(capture.analysis.status) ||
       !["live_model", "unavailable"].includes(
@@ -198,12 +199,18 @@ export function resultProblem(result: AnalysisResult): string | null {
   if (result.quality.faceDetected)
     return "Crop the photo to show only the mouth, then try again.";
   const reasons = [...result.quality.reasons, ...result.abstentionReasons];
+  if (reasons.includes("image_too_small"))
+    return "Choose a higher-resolution photo or take a new one.";
   if (reasons.some((reason) => /privacy|face.*unavailable/i.test(reason)))
     return "The photo privacy check could not finish. Try again.";
-  if (reasons.some((reason) => /blur|focus/i.test(reason)))
-    return "The photo is out of focus. Hold still and take another.";
+  if (reasons.includes("excessive_glare"))
+    return "Move away from direct light and try another photo.";
   if (reasons.some((reason) => /dark|exposure|lighting/i.test(reason)))
     return "Use even lighting and try another photo.";
+  if (reasons.includes("image_obstructed"))
+    return "Keep the mouth clear of fingers and other objects, then try again.";
+  if (reasons.some((reason) => /blur|focus/i.test(reason)))
+    return "The photo is out of focus. Hold still and take another.";
   if (
     !result.anatomyPrediction.selectedRegionMatches &&
     result.anatomyPrediction.region
