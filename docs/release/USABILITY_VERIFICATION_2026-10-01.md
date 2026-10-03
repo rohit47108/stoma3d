@@ -1,8 +1,8 @@
 # Stoma3D usability verification
 
-Snapshot started: 2026-10-01. Updated: 2026-10-02. This record covers the approved usability and reliability plan in `C:\Users\rohit\Projects\oralsight`. It records completed software checks, real-image results, deployments, and remaining checks separately. It is not a completed release sign-off.
+Snapshot started: 2026-10-01. Updated: 2026-10-03. This record covers the approved usability and reliability plan in `C:\Users\rohit\Projects\oralsight`. It records completed software checks, real-image results, deployments, and remaining checks separately. It is not a completed release sign-off.
 
-The tested source commit is `b34e423de135cc303544f0ccd7cb35d0ed617871`. These focused implementation commits are pushed to the existing [public Stoma3D repository](https://github.com/rohit47108/stoma3d):
+The latest tested source commit is `98165e27af64c3e3eb6a74ae31e560b60d117653`. These focused implementation commits are pushed to the existing [public Stoma3D repository](https://github.com/rohit47108/stoma3d):
 
 - `a7ac64c`: Fix capture quality and deployed privacy checks
 - `2a462e1`: Simplify mobile scanning and protect photo recovery
@@ -11,12 +11,15 @@ The tested source commit is `b34e423de135cc303544f0ccd7cb35d0ed617871`. These fo
 - `d882fbd`: Include visual descriptions in browser reports
 - `71f6303`: Keep observation map zoom within viewing limits
 - `b34e423`: Offer browser scans from account entry
+- `e395c20`: Add bounded camera startup and stale-photo cancellation
+- `841e782`: Clarify connection-failure retry guidance
+- `98165e2`: Add map rotation controls and intake heading focus
 
-The final web review fixes pass source checks and are deployed. The saved eight-region scan reopened on the replacement build, and its final report passed text and visual checks. Map zoom, account entry, and photo-rejection messages also passed production UI checks. A fresh complete eight-region recapture was not repeated on this replacement build.
+The October 3 web fixes pass source checks and are deployed. A fresh licensed-image upload scan saved all eight regions on that build. Camera-startup recovery, retained-photo network retry, map rotation, and intake focus also passed production interface checks. Physical-camera and remaining platform checks are incomplete.
 
 ## Real browser results
 
-The [production guest scan workspace](https://stoma3d.vercel.app/scan) called the deployed inference service. Test inputs were licensed SMART-OM mouth images outside Git. This record contains no patient identifiers, source image filenames, or image bytes.
+The [production guest scan workspace](https://stoma3d.vercel.app/scan) called the deployed inference service. Test inputs were licensed SMART-OM mouth images outside Git. This record contains no patient identifiers, source image filenames, or image bytes. The following results cover the October 1 and October 2 runs:
 
 | Check                     | Observed result                                                                                                    |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -40,11 +43,38 @@ The first dorsal-tongue attempt exposed a missing privacy detector in the live d
 
 During local development, a sixth analysis completed while the development server reloaded, but its storage write failed. The saved scan stayed at 5/8. The completed storage fix retains the review photo and does not count an unsaved result as durable progress. Focused storage tests also cover failed writes, deletion during a save, and stale writes from another tab.
 
-The initial nine-page browser report exposed missing descriptor details during text extraction and a rendered-page check. The corrected report was then exported from the saved 8/8 scan on the final deployed build using Chrome DevTools Protocol (CDP) print-to-PDF.
+The initial nine-page browser report exposed missing descriptor details during text extraction and a rendered-page check. The corrected report was then exported from the saved 8/8 scan on the October 2 deployed build using Chrome DevTools Protocol (CDP) print-to-PDF.
 
-The final artifact is `outputs/usability-checks/browser-eight-region-verified.pdf`, 1,414,160 bytes. Reopening it with `pypdf` confirmed nine pages, all eight captures and regions, complete live-model provenance, and descriptors on both cheek pages. The report retained the confirmed left-cheek observation and unconfirmed right-cheek candidate. Visual inspection of all nine rendered pages found legible photos, masks, and descriptors with no overlap or clipping. Keep this licensed-image test artifact outside Git.
+The October 2 report artifact is `outputs/usability-checks/browser-eight-region-verified.pdf`, 1,414,160 bytes. Reopening it with `pypdf` confirmed nine pages, all eight captures and regions, complete live-model provenance, and descriptors on both cheek pages. The report retained the confirmed left-cheek observation and unconfirmed right-cheek candidate. Visual inspection of all nine rendered pages found legible photos, masks, and descriptors with no overlap or clipping. Keep this licensed-image test artifact outside Git.
 
 CDP export verifies the deployed print layout and generated PDF file. It does not verify the browser’s interactive print dialog, phone PDF saving, or native app report generation.
+
+### October 3 production recheck
+
+The current deployment passed the following browser checks with licensed-image uploads and temporary, tab-scoped test controls:
+
+| Check                     | Observed result                                                                                                                                     |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unanswered camera request | The configured 20s deadline ended startup and showed accurate retry/upload guidance                                                                 |
+| Startup cancellation      | Cancel closed startup; choosing a photo during startup cancelled it and opened photo review                                                         |
+| Connection failure        | A temporary analysis-network block showed “Could not connect. Your photo is still here; try again.” at 2/8                                          |
+| Retry after reconnection  | The same retained photo returned a verified live result and saved at 3/8; explicit confirmation added the left-cheek pin                            |
+| Map rotation and zoom     | Canvas arrow keys and all four rotation buttons rotated the map; zoom also worked                                                                   |
+| Phone-width controls      | Rotation buttons measured 44 × 44 CSS pixels; the checked map had no horizontal overflow at 390 × 844 CSS pixels                                    |
+| Dark-preference focus     | Emulated dark preference retained the amber `#a55710` canvas focus ring and `color-scheme: light`                                                   |
+| Intake focus and consent  | The heading received focus on mount, Continue, the optional third step, and Back; Tab reached consent, and Continue stayed disabled without consent |
+| Fresh eight-region scan   | A new 0/8 scan returned eight verified live-model results and saved all eight canonical regions at 8/8                                              |
+| Observation confirmation  | The left-cheek candidate covered approximately 41.1% and was confirmed; the approximately 22.8% right-cheek candidate stayed unconfirmed            |
+| Completed map             | The fresh scan showed all eight accepted regions and only the confirmed left-cheek pin                                                              |
+| Reload and History        | Home resumed an older unfinished 3/8 scan; History retained the fresh October 3 scan at 8/8 and reopened it correctly                               |
+
+These camera checks exercised stalled startup and cancellation, not a real-camera frame. All temporary network blocking and browser emulation were reset after testing.
+
+The fresh report is `outputs/usability-checks/browser-eight-region-2026-10-03.pdf`, 1,414,279 bytes. `pypdf` confirmed nine pages, eight unique captures, eight `live_model` results, all eight regions, one confirmed observation, and one unconfirmed candidate.
+
+Visual inspection of all nine rendered pages found legible content with no clipping or overlap. Both cheek pages showed the correct masks, descriptors, and confirmation states; all eight region headings appeared. Keep this licensed-image test artifact and its rendering intermediates outside Git.
+
+This report used CDP export. The automated print-control click timed out, so the interactive print dialog remains unverified.
 
 ## Photo-check evidence
 
@@ -54,7 +84,7 @@ The [quality-check record](../quality/QUALITY_CHECKS_2026-10-01.md) covers 80 li
 
 Browser uploads of severely blurred, dark, overexposed, and 64 × 64 pixel controls were rejected. Rejected controls did not increase the new scan’s coverage above 0/8. An unreadable JPEG produced a decode error rather than a blur warning and did not become a saved capture. Specific lighting and image-size messages now pass regression tests.
 
-A rotated dorsal-tongue image was corrected using Rotate 90° and Apply crop. It then returned a signed live analysis and saved as the first accepted region of a separate scan. Glare-heavy, full-face, and interrupted-request UI cases still need recorded results.
+A rotated dorsal-tongue image was corrected using Rotate 90° and Apply crop. It then returned a signed live analysis and saved as the first accepted region of a separate scan. Glare-heavy and full-face interface cases still need recorded results. The October 3 network retry above covers one interrupted analysis request, not every interruption case.
 
 Production rechecks on that separate scan returned these messages:
 
@@ -79,38 +109,44 @@ These checks do not verify real camera focus, physical sensors, iPhone permissio
 
 ## Source and build checks
 
-The latest full JavaScript run after the final web review fixes passed 382 tests. Type checks, lint, formatting, and the production build also passed:
+The October 3 full JavaScript run passed 404 tests. Full TypeScript checks, web lint, formatting, and the configured production build also passed. Python and native results below remain evidence from the preceding run:
 
 | Check                       | Evidence at this snapshot                                                                                   |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Locked JavaScript install   | `pnpm install --frozen-lockfile --ignore-scripts` passed                                                    |
-| JavaScript tests            | Scripts 22, contracts 33, web 121, mobile 206: 382 passed                                                   |
-| TypeScript                  | Final web build type check passed; unchanged workspaces passed the preceding full type-check run            |
+| JavaScript tests            | Scripts 22, contracts 33, web 143, mobile 206: 404 passed                                                   |
+| TypeScript                  | Full workspace type-check run passed on October 3                                                           |
 | Python tests                | 343 passed, 1 skipped; the skip requires external PostgreSQL bootstrap infrastructure                       |
 | Python lint and format      | Ruff check and format checks passed; Python source is unchanged since that run                              |
-| Formatting                  | `pnpm format:check` passed after the final web review fixes                                                 |
-| Web lint                    | Full ESLint check passed after the final web review fixes                                                   |
-| Web production build        | Final Next.js production build passed with 34 generated routes                                              |
+| Formatting                  | `pnpm format:check` and `git diff --check` passed after the October 3 fixes                                 |
+| Web lint                    | Full ESLint check passed after the October 3 fixes                                                          |
+| Web production build        | Public-mode Next.js production build passed with 34 generated routes                                        |
+| GitHub safety audit         | [October 3 safety-audit run](https://github.com/rohit47108/stoma3d/actions/runs/37133276198) succeeded      |
+| GitHub TypeScript checks    | [October 3 TypeScript run](https://github.com/rohit47108/stoma3d/actions/runs/37133276199) succeeded        |
 | Shared contracts            | Generation completed without changing checked schemas                                                       |
 | JavaScript dependency audit | Dependency audit passed                                                                                     |
 | Repository audit            | Artifact, inventory, map-hash, and license-notice checks passed                                             |
-| Independent review          | Targeted storage, save-recovery, and anatomy-acceptance review found no high-priority defect in those fixes |
+| Independent review          | Earlier storage/anatomy reviews passed; October 3 static camera, transport, and map review found no blocker |
 | Signing-profile regression  | Tests passed after correcting both Expo Application Services (EAS) public-key pins                          |
 | iOS JavaScript export       | Expo export passed; this is not an installable iPhone build                                                 |
 | Android ARM64 build         | Rebuilt local test APK passed; physical-device installation is unverified                                   |
 | Android x86_64 build        | Rebuilt release APK installed on the emulator and passed the runtime checks above                           |
 
+The production build used `STOMA3D_WEB_MODE=public` and `NEXT_PUBLIC_SITE_URL=https://stoma3d.vercel.app`. The initial default local build correctly refused missing hosted-platform configuration. No configuration guard was bypassed.
+
 Native regression tests require supported, matching anatomy before a new capture becomes saved coverage. A failed transport retry preserves a previously accepted capture. Save rollback retains the protected review image. These changes are included in the rebuilt Android artifact below.
 
-The final web regressions cover report/result descriptor parity, bounded zoom around the selected map target, exact anatomy-region matching, and actionable quality messages. Runtime checks against the new deployment remain separate from these source tests.
+Web regressions cover report/result descriptor parity, bounded map zoom and rotation, exact anatomy-region matching, and actionable quality messages. October 3 tests also cover camera timeout, cancellation, late stream release, stale photo preparation, connection-failure copy, and consent-heading markup. Production interface checks remain separate from these source tests.
 
 ## Deployments and build artifacts
 
-The web deployment `dpl_GmEduqcKZ4s9PXujc7ty3yT95d7n` is ready at [Stoma3D](https://stoma3d.vercel.app/scan). It contains the final reviewed source commit `b34e423de135cc303544f0ccd7cb35d0ed617871`. The immutable deployment is [the October 2 Stoma3D web build](https://stoma3d-puyndlyrh-rohit-singhs-projects-48f82479.vercel.app).
+The current web deployment `dpl_4BVZbCXqygmMfQcZtHEs6HhqHkH6` is ready at [Stoma3D](https://stoma3d.vercel.app/scan). It contains source commit `98165e27af64c3e3eb6a74ae31e560b60d117653`. Its immutable deployment is [the October 3 Stoma3D web build](https://stoma3d-gltwzxthx-rohit-singhs-projects-48f82479.vercel.app). The fresh eight-region scan and October 3 interface checks above ran against this deployment.
 
-The eight-region browser scan ran against the preceding production deployment `dpl_6Jj24nsC9CShFz8hSubkPn5MkV9x`, not only the local development server. Its stored records reopened on the replacement deployment. The verified report, bounded zoom, account-entry route, and dark/low-resolution recovery checks above ran against that replacement build. A fresh eight-region recapture on the replacement deployment remains unverified.
+The preceding web deployment `dpl_GmEduqcKZ4s9PXujc7ty3yT95d7n` contains source commit `b34e423de135cc303544f0ccd7cb35d0ed617871`. Its immutable deployment is [the October 2 Stoma3D web build](https://stoma3d-puyndlyrh-rohit-singhs-projects-48f82479.vercel.app).
 
-The inference deployment `dpl_2byfoVn6jBcH3QTmoZykHYAL4mqk` is ready at [the production health endpoint](https://stoma3d-inference.vercel.app/api/healthz). The October 2 health check reported:
+The initial eight-region browser scan ran against production deployment `dpl_6Jj24nsC9CShFz8hSubkPn5MkV9x`, not only the local development server. Its stored records reopened on the October 2 replacement deployment. The earlier verified report, bounded zoom, account-entry route, and dark/low-resolution recovery checks ran against that replacement build. A fresh eight-region scan was not repeated on October 2; the October 3 run now records one on the current build.
+
+The inference deployment `dpl_2byfoVn6jBcH3QTmoZykHYAL4mqk` is unchanged by these web fixes. Its [production health endpoint](https://stoma3d-inference.vercel.app/api/healthz) passed the October 2 check with:
 
 - `privacyReady: true` and `analysisReady: true`
 - Required response signing with signing configured
@@ -120,7 +156,7 @@ The inference deployment `dpl_2byfoVn6jBcH3QTmoZykHYAL4mqk` is ready at [the pro
 
 The inference deployment includes both private model artifacts and the bundled YuNet face detector. Upload exclusions no longer remove nested `assets` directories. The [deployment handoff](../DEPLOYMENT.md) explains preserving that bundle when replacing inference.
 
-The Android APK is a local test artifact, not a store release. It is 97,372,209 bytes and uses local test signing. Its production inference URL and current public response key match the deployed service. Keep the generated package out of Git:
+The previously rebuilt Android APK is a local test artifact, not a store release. It is 97,372,209 bytes and uses local test signing. Its production inference URL and public response key matched the deployed service in the preceding run. Keep the generated package out of Git:
 
 ```text
 outputs/native/Stoma3D-2026-10-01-arm64.apk
@@ -134,14 +170,13 @@ Expo login remains incomplete; the owner chose to do it later. No installable iP
 
 Complete these checks before treating the approved usability plan as finished:
 
-- Repeat a fresh complete eight-region scan against the final web deployment
 - Check browser print dialogs, phone PDF saving, and native report generation separately from the verified CDP export
-- Exercise the remaining negative image cases, network failures, signature failures, and retry paths through the interface
+- Exercise the remaining negative image cases, network and signature failures, and retry paths beyond the recorded retained-photo retry
 - Check encrypted saved data, deletion, interrupted captures, and migrated records against dedicated test data
 - Complete native upload, results, map, report, and restart journeys, keeping emulator checks separate from physical-camera checks
 - Complete ten consecutive end-to-end flows per platform; no completed series is recorded here
 - Test real front and back cameras, focus, permissions, interruption, and iPhone HEIC uploads on physical phones
-- Check screen readers, large text, reduced motion, keyboard navigation, and narrow-screen layouts on the required browsers and devices
+- Check screen readers, large text, reduced motion, and required browser/device coverage beyond the recorded focus, map keyboard, and phone-width checks
 - Produce the installable iPhone build after Expo login and Apple signing setup
 - Record all final artifact hashes, tested device/browser coverage, and unresolved issues
 
