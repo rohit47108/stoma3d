@@ -194,6 +194,20 @@ export function captureSummary(capture: GuestCapture): string {
     : "No candidate area detected";
 }
 
+export function suggestedRetryRegion(
+  result: AnalysisResult,
+): MouthRegion | null {
+  const anatomy = result.anatomyPrediction;
+  return ["abstained", "unsupported"].includes(result.status) &&
+    result.quality.accepted &&
+    !result.quality.faceDetected &&
+    anatomy.supported &&
+    !anatomy.selectedRegionMatches &&
+    anatomy.region !== result.region
+    ? anatomy.region
+    : null;
+}
+
 export function resultProblem(result: AnalysisResult): string | null {
   if (result.status === "complete") return null;
   if (result.quality.faceDetected)

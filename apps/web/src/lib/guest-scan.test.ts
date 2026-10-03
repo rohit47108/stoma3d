@@ -15,6 +15,7 @@ import {
   guestSessionSchema,
   addGuestCapture,
   resultProblem,
+  suggestedRetryRegion,
 } from "./guest-scan";
 import { fittedImageSize, validatePhotoFile } from "./scan-image";
 import { encryptGuestRecord, decryptGuestRecord } from "./guest-storage";
@@ -210,6 +211,45 @@ describe("photo correction instructions", () => {
       ).toBe("The photo privacy check could not finish. Try again.");
     },
   );
+
+  it("offers a supported alternate region without accepting the mismatched result", () => {
+    const result = testCapture().analysis;
+    result.status = "unsupported";
+    result.anatomyPrediction.region = "ventral_tongue";
+    result.anatomyPrediction.selectedRegionMatches = false;
+
+    expect(suggestedRetryRegion(result)).toBe("ventral_tongue");
+    expect(() =>
+      addGuestCapture(createGuestSession("scan-1"), {
+        ...testCapture(),
+        analysis: result,
+      }),
+    ).toThrow("matching anatomy");
+  });
+
+  it.each([
+    "rejected-quality",
+    "detected-face",
+    "unsupported-anatomy",
+    "matching-region",
+    "complete",
+    "failed",
+  ])("does not suggest changing regions for %s", (condition) => {
+    const result = testCapture().analysis;
+    result.status = "unsupported";
+    result.anatomyPrediction.region = "ventral_tongue";
+    result.anatomyPrediction.selectedRegionMatches = false;
+    if (condition === "rejected-quality") result.quality.accepted = false;
+    if (condition === "detected-face") result.quality.faceDetected = true;
+    if (condition === "unsupported-anatomy")
+      result.anatomyPrediction.supported = false;
+    if (condition === "matching-region")
+      result.anatomyPrediction.region = result.region;
+    if (condition === "complete") result.status = "complete";
+    if (condition === "failed") result.status = "failed";
+
+    expect(suggestedRetryRegion(result)).toBeNull();
+  });
 });
 
 describe("browser image preparation", () => {

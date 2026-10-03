@@ -19,6 +19,7 @@ import {
   nextGuestRegion,
   regionDetail,
   resultProblem,
+  suggestedRetryRegion,
   type GuestCapture,
   type GuestSession,
 } from "@/lib/guest-scan";
@@ -52,6 +53,9 @@ export function ScanWorkspace() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [suggestedRegion, setSuggestedRegion] = useState<MouthRegion | null>(
+    null,
+  );
   const [storageProblem, setStorageProblem] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<"user" | "environment">(
@@ -77,6 +81,7 @@ export function ScanWorkspace() {
       setCapture(null);
       setPhoto(null);
       setProblem(null);
+      setSuggestedRegion(null);
       setStorageProblem(null);
       setDeleteConfirm(false);
       setDestination("home");
@@ -167,6 +172,7 @@ export function ScanWorkspace() {
     if (busyRef.current) return;
     setPhoto(null);
     setProblem(null);
+    setSuggestedRegion(null);
     setDestination(next);
     setDeleteConfirm(false);
     if (next === "scan") {
@@ -177,6 +183,7 @@ export function ScanWorkspace() {
 
   function begin() {
     setProblem(null);
+    setSuggestedRegion(null);
     setPhoto(null);
     setDestination("scan");
     if (session && session.captures.length < 8) {
@@ -212,6 +219,7 @@ export function ScanWorkspace() {
     busyRef.current = true;
     setBusy(true);
     setProblem(null);
+    setSuggestedRegion(null);
     const generation = dataGenerationRef.current;
     const controller = new AbortController();
     requestRef.current = controller;
@@ -238,6 +246,7 @@ export function ScanWorkspace() {
         )
       ) {
         setProblem(correction);
+        setSuggestedRegion(suggestedRetryRegion(result));
         return;
       }
       const accepted: GuestCapture = {
@@ -474,6 +483,7 @@ export function ScanWorkspace() {
                       onPhoto={(next) => {
                         setPhoto(next);
                         setProblem(null);
+                        setSuggestedRegion(null);
                         setStage("review");
                       }}
                       onProblem={setProblem}
@@ -485,14 +495,28 @@ export function ScanWorkspace() {
                     photo={photo}
                     busy={busy}
                     problem={problem}
+                    regionCorrection={
+                      suggestedRegion
+                        ? {
+                            region: suggestedRegion,
+                            onApply: () => {
+                              setRegion(suggestedRegion);
+                              setSuggestedRegion(null);
+                              setProblem(null);
+                            },
+                          }
+                        : undefined
+                    }
                     onChange={(next) => {
                       setPhoto(next);
                       setProblem(null);
+                      setSuggestedRegion(null);
                     }}
                     onUse={() => void analyze()}
                     onReplace={() => {
                       setPhoto(null);
                       setProblem(null);
+                      setSuggestedRegion(null);
                       setStage("capture");
                     }}
                   />

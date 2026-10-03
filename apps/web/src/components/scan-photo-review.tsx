@@ -1,7 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { MouthRegion } from "@stoma3d/contracts";
+import { regionDetail } from "@/lib/guest-scan";
 import {
   decodePhoto,
   prepareCanvasPhoto,
@@ -15,6 +17,7 @@ interface Props {
   onChange: (photo: PreparedPhoto) => void;
   onUse: () => void;
   onReplace: () => void;
+  regionCorrection?: { region: MouthRegion; onApply: () => void };
 }
 
 export function ScanPhotoReview({
@@ -24,6 +27,7 @@ export function ScanPhotoReview({
   onChange,
   onUse,
   onReplace,
+  regionCorrection,
 }: Props) {
   const [confirmed, setConfirmed] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -32,15 +36,28 @@ export function ScanPhotoReview({
   const [offsetX, setOffsetX] = useState(50);
   const [offsetY, setOffsetY] = useState(50);
   const [localProblem, setLocalProblem] = useState<string | null>(null);
+  const editRef = useRef<AbortController | null>(null);
   const left = (insetX * 2 * offsetX) / 100;
   const top = (insetY * 2 * offsetY) / 100;
 
+  useEffect(() => {
+    // Ignore asynchronous image work after navigation removes this review.
+    // https://react.dev/reference/react/useEffect#fetching-data-with-effects
+    return () => {
+      editRef.current?.abort();
+      editRef.current = null;
+    };
+  }, []);
+
   async function edit(turns: number, crop: boolean) {
-    if (editing || busy) return;
+    if (editRef.current || busy) return;
+    const controller = new AbortController();
+    editRef.current = controller;
     setEditing(true);
     setLocalProblem(null);
     try {
       const image = await decodePhoto(photo.blob);
+      if (controller.signal.aborted) return;
       const next = await prepareCanvasPhoto(
         image,
         image.naturalWidth,
@@ -55,6 +72,7 @@ export function ScanPhotoReview({
           : undefined,
         turns,
       );
+      if (controller.signal.aborted) return;
       onChange(next);
       setInsetX(0);
       setInsetY(0);
@@ -62,13 +80,17 @@ export function ScanPhotoReview({
       setOffsetY(50);
       setConfirmed(false);
     } catch (error) {
+      if (controller.signal.aborted) return;
       setLocalProblem(
         error instanceof Error
           ? error.message
           : "The edit could not be applied. Try again.",
       );
     } finally {
-      setEditing(false);
+      if (editRef.current === controller) {
+        editRef.current = null;
+        setEditing(false);
+      }
     }
   }
 
@@ -182,6 +204,21 @@ export function ScanPhotoReview({
         <p role="alert" className="scan-error">
           {problem || localProblem}
         </p>
+      )}
+      {problem && regionCorrection && (
+        <button
+          type="button"
+          className="scan-button"
+          disabled={busy || editing}
+          onClick={() => {
+            if (busy || editRef.current) return;
+            setConfirmed(false);
+            setLocalProblem(null);
+            regionCorrection.onApply();
+          }}
+        >
+          {`Change to ${regionDetail(regionCorrection.region).shortLabel.toLowerCase()}`}
+        </button>
       )}
       <div className="scan-actions">
         <button
