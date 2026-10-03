@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CameraStartupTimeoutError,
+  prepareCurrentCameraPhoto,
+  startCameraPreview,
+  stopCameraStream,
+} from "@/lib/scan-camera-lifecycle";
+import {
   prepareCanvasPhoto,
   preparePhotoFile,
   type PreparedPhoto,
@@ -23,6 +29,7 @@ export function ScanCamera({
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const requestRef = useRef({ sequence: 0 });
+  const startupRef = useRef<AbortController | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const [facing, setFacing] = useState<"user" | "environment">(initialFacing);
   const [cameraState, setCameraState] = useState<
@@ -31,31 +38,33 @@ export function ScanCamera({
   const [busy, setBusy] = useState(false);
   const [cameraMessage, setCameraMessage] = useState("");
   const stop = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    requestRef.current.sequence++;
+    startupRef.current?.abort();
+    startupRef.current = null;
+    if (streamRef.current) stopCameraStream(streamRef.current);
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
+    if (uploadRef.current) uploadRef.current.value = "";
   }, []);
 
   useEffect(() => {
-    const requests = requestRef.current;
     const interrupted = () => {
       if (document.hidden) {
-        requests.sequence++;
         stop();
         setCameraState("closed");
+        setBusy(false);
       }
     };
     document.addEventListener("visibilitychange", interrupted);
     return () => {
-      requests.sequence++;
       stop();
       document.removeEventListener("visibilitychange", interrupted);
     };
   }, [stop]);
 
   async function openCamera(nextFacing = facing) {
-    const requestId = ++requestRef.current.sequence;
     stop();
+    const requestId = requestRef.current.sequence;
     setCameraState("opening");
     setCameraMessage("");
     setFacing(nextFacing);
@@ -67,22 +76,35 @@ export function ScanCamera({
       );
       return;
     }
+    const controller = new AbortController();
+    startupRef.current = controller;
     try {
       // Release the previous camera before changing facingMode.
       // https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          facingMode: { ideal: nextFacing },
-          width: { ideal: 1600 },
-          height: { ideal: 1200 },
+      const stream = await startCameraPreview({
+        signal: controller.signal,
+        requestStream: () =>
+          navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              facingMode: { ideal: nextFacing },
+              width: { ideal: 1600 },
+              height: { ideal: 1200 },
+            },
+          }),
+        playStream: async (received) => {
+          const video = videoRef.current;
+          if (!video) throw new Error("Camera preview is unavailable.");
+          streamRef.current = received;
+          video.srcObject = received;
+          await video.play();
         },
       });
       if (requestId !== requestRef.current.sequence) {
-        stream.getTracks().forEach((track) => track.stop());
+        stopCameraStream(stream);
         return;
       }
-      streamRef.current = stream;
+      startupRef.current = null;
       const actualFacing = stream.getVideoTracks()[0]?.getSettings().facingMode;
       if (actualFacing === "user" || actualFacing === "environment") {
         setFacing(actualFacing);
@@ -92,10 +114,6 @@ export function ScanCamera({
             "The other camera is unavailable. You can use this camera or choose a photo.",
           );
       }
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
       setCameraState("open");
     } catch (error) {
       if (requestId !== requestRef.current.sequence) return;
@@ -103,9 +121,11 @@ export function ScanCamera({
       setCameraState("error");
       const name = error instanceof DOMException ? error.name : "";
       setCameraMessage(
-        name === "NotAllowedError"
-          ? "Allow camera access in your browser settings, or choose a photo."
-          : "The camera could not open. Try again or choose a photo.",
+        error instanceof CameraStartupTimeoutError
+          ? "The camera is taking too long to open. Check browser permissions, then try again or choose a photo."
+          : name === "NotAllowedError"
+            ? "Allow camera access in your browser settings, or choose a photo."
+            : "The camera could not open. Try again or choose a photo.",
       );
     }
   }
@@ -113,42 +133,54 @@ export function ScanCamera({
   async function takePhoto() {
     const video = videoRef.current;
     if (!video || busy) return;
+    const requestId = ++requestRef.current.sequence;
+    const isCurrent = () => requestId === requestRef.current.sequence;
     setBusy(true);
     try {
-      const photo = await prepareCanvasPhoto(
-        video,
-        video.videoWidth,
-        video.videoHeight,
+      const photo = await prepareCurrentCameraPhoto(
+        () => prepareCanvasPhoto(video, video.videoWidth, video.videoHeight),
+        isCurrent,
       );
+      if (!photo) return;
+      setBusy(false);
       stop();
+      setCameraState("closed");
       onPhoto(photo);
     } catch (error) {
+      if (!isCurrent()) return;
       onProblem(
         error instanceof Error
           ? error.message
           : "The photo could not be read. Try again.",
       );
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   }
 
   async function upload(file: File | undefined) {
     if (!file || busy) return;
     setBusy(true);
-    requestRef.current.sequence++;
     stop();
+    const requestId = requestRef.current.sequence;
+    const isCurrent = () => requestId === requestRef.current.sequence;
     setCameraState("closed");
     try {
-      const photo = await preparePhotoFile(file);
+      const photo = await prepareCurrentCameraPhoto(
+        () => preparePhotoFile(file),
+        isCurrent,
+      );
+      if (!photo) return;
+      setBusy(false);
+      stop();
       onPhoto(photo);
     } catch (error) {
+      if (!isCurrent()) return;
       onProblem(
         error instanceof Error ? error.message : "Choose another photo.",
       );
     } finally {
-      setBusy(false);
-      if (uploadRef.current) uploadRef.current.value = "";
+      if (isCurrent()) setBusy(false);
     }
   }
 
@@ -215,10 +247,28 @@ export function ScanCamera({
           type="button"
           className="scan-button"
           disabled={busy}
-          onClick={() => uploadRef.current?.click()}
+          onClick={() => {
+            stop();
+            setCameraState("closed");
+            setCameraMessage("");
+            uploadRef.current?.click();
+          }}
         >
           Choose a photo
         </button>
+        {cameraState === "opening" && (
+          <button
+            type="button"
+            className="scan-button"
+            onClick={() => {
+              stop();
+              setCameraState("closed");
+              setCameraMessage("");
+            }}
+          >
+            Cancel
+          </button>
+        )}
         {cameraState === "open" && (
           <button
             type="button"
