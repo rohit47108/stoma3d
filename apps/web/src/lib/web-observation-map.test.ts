@@ -6,6 +6,7 @@ import {
   WEB_MAP_ASSET_VERSION,
   WEB_MAP_MESHES,
   webPinPosition,
+  rotateWebObservationMap,
   zoomWebObservationMap,
 } from "./web-observation-map";
 
@@ -32,6 +33,97 @@ describe("browser observation map metadata", () => {
     expect(() => webPinPosition({ ...pin, meshId: "lip_upper" })).toThrow(
       "version",
     );
+  });
+});
+
+describe("browser observation map rotation", () => {
+  it.each([
+    ["left", -Math.PI / 12],
+    ["right", Math.PI / 12],
+  ] as const)(
+    "rotates %s around the target without changing distance",
+    (direction, angle) => {
+      const camera = new PerspectiveCamera();
+      const controls = new OrbitControls(camera);
+      controls.target.set(1, -0.1, 2);
+      camera.position.copy(controls.target).add(new Vector3(0, 1, 4.5));
+      controls.update();
+      const distance = controls.getDistance();
+      const polarAngle = controls.getPolarAngle();
+
+      rotateWebObservationMap(camera, controls, direction);
+
+      expect(controls.getAzimuthalAngle()).toBeCloseTo(angle);
+      expect(controls.getPolarAngle()).toBeCloseTo(polarAngle);
+      expect(camera.position.distanceTo(controls.target)).toBeCloseTo(distance);
+    },
+  );
+
+  it.each(["up", "down"] as const)(
+    "bounds repeated %s rotation within the polar limits",
+    (direction) => {
+      const camera = new PerspectiveCamera();
+      const controls = new OrbitControls(camera);
+      controls.target.set(1, -0.1, 2);
+      controls.minPolarAngle = Math.PI / 6;
+      controls.maxPolarAngle = (5 * Math.PI) / 6;
+      camera.position.copy(controls.target).add(new Vector3(0, 0, 4.5));
+      controls.update();
+
+      for (let press = 0; press < 200; press++)
+        rotateWebObservationMap(camera, controls, direction);
+
+      expect(controls.getPolarAngle()).toBeCloseTo(
+        direction === "up" ? controls.minPolarAngle : controls.maxPolarAngle,
+      );
+      expect(camera.position.distanceTo(controls.target)).toBeCloseTo(4.5);
+      expect(camera.up.equals(new Vector3(0, 1, 0))).toBe(true);
+    },
+  );
+
+  it("keeps the orbit target fixed and updates the viewing direction", () => {
+    const camera = new PerspectiveCamera();
+    const controls = new OrbitControls(camera);
+    const target = new Vector3(1, -0.1, 2);
+    controls.target.copy(target);
+    camera.position.copy(target).add(new Vector3(0, 0, 4.5));
+    controls.update();
+    const orientation = camera.quaternion.clone();
+
+    rotateWebObservationMap(camera, controls, "up");
+
+    expect(controls.target.equals(target)).toBe(true);
+    expect(camera.quaternion.angleTo(orientation)).toBeCloseTo(Math.PI / 12);
+    expect(
+      new Vector3()
+        .setFromMatrixPosition(camera.matrixWorld)
+        .distanceTo(camera.position),
+    ).toBeCloseTo(0);
+    expect(
+      camera
+        .getWorldDirection(new Vector3())
+        .distanceTo(target.clone().sub(camera.position).normalize()),
+    ).toBeCloseTo(0);
+  });
+
+  it("keeps the camera upright when rotating toward either pole", () => {
+    const camera = new PerspectiveCamera();
+    const controls = new OrbitControls(camera);
+    camera.position.set(0, 0, 4.5);
+    controls.update();
+
+    for (let press = 0; press < 200; press++)
+      rotateWebObservationMap(camera, controls, "up");
+
+    expect(controls.getPolarAngle()).toBeGreaterThan(0);
+    expect(controls.getPolarAngle()).toBeLessThan(Math.PI);
+
+    for (let press = 0; press < 200; press++)
+      rotateWebObservationMap(camera, controls, "down");
+
+    expect(controls.getPolarAngle()).toBeGreaterThan(0);
+    expect(controls.getPolarAngle()).toBeLessThan(Math.PI);
+    expect(camera.position.distanceTo(controls.target)).toBeCloseTo(4.5);
   });
 });
 

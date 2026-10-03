@@ -16,7 +16,9 @@ import {
   WEB_REGION_POSITIONS,
   WEB_REGION_SCALES,
   webPinPosition,
+  rotateWebObservationMap,
   zoomWebObservationMap,
+  type WebMapRotation,
 } from "@/lib/web-observation-map";
 import type { GuestPin } from "@/lib/guest-scan";
 
@@ -35,6 +37,13 @@ interface MapRuntime {
   pins: Group;
   draw: () => void;
 }
+
+const ROTATION_KEYS: Record<string, WebMapRotation | undefined> = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "up",
+  ArrowDown: "down",
+};
 
 export function ScanObservationMap({
   completed,
@@ -71,8 +80,10 @@ export function ScanObservationMap({
         renderer.setClearColor(0xf0f5f2, 1);
         renderer.domElement.setAttribute(
           "aria-label",
-          "Interactive oral map. Drag to rotate and use the zoom controls. The region list provides keyboard selection.",
+          "Interactive oral map. Drag or use arrow keys to rotate. Use the zoom controls to zoom. Select regions in the list.",
         );
+        renderer.domElement.setAttribute("role", "img");
+        renderer.domElement.tabIndex = 0;
         mount.appendChild(renderer.domElement);
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 50);
@@ -199,15 +210,29 @@ export function ScanObservationMap({
           event.preventDefault();
           setState("fallback");
         };
+        const keyDown = (event: KeyboardEvent) => {
+          if (event.ctrlKey || event.metaKey || event.altKey) return;
+          const direction = ROTATION_KEYS[event.key];
+          if (!direction) return;
+          event.preventDefault();
+          rotateWebObservationMap(camera, controls, direction);
+          draw();
+        };
         renderer.domElement.addEventListener("pointerdown", pointerDown);
         renderer.domElement.addEventListener("pointerup", pointerUp);
         renderer.domElement.addEventListener("webglcontextlost", lost);
+        renderer.domElement.addEventListener("keydown", keyDown);
         controls.addEventListener("change", draw);
         controls.update();
         resize();
         setState("ready");
         cleanup = () => {
           observer.disconnect();
+          renderer.domElement.removeEventListener("pointerdown", pointerDown);
+          renderer.domElement.removeEventListener("pointerup", pointerUp);
+          renderer.domElement.removeEventListener("webglcontextlost", lost);
+          renderer.domElement.removeEventListener("keydown", keyDown);
+          controls.removeEventListener("change", draw);
           controls.dispose();
           runtime.current = null;
           scene.traverse((object) => {
@@ -277,6 +302,13 @@ export function ScanObservationMap({
     map.draw();
   }
 
+  function rotate(direction: WebMapRotation) {
+    const map = runtime.current;
+    if (!map) return;
+    rotateWebObservationMap(map.camera, map.controls, direction);
+    map.draw();
+  }
+
   return (
     <div className="scan-map-layout">
       <div className="scan-map-stage">
@@ -341,6 +373,28 @@ export function ScanObservationMap({
             >
               −
             </button>
+            <details className="scan-map-rotation">
+              <summary>Rotate map</summary>
+              <div className="scan-map-rotation-buttons">
+                {(
+                  [
+                    ["left", "←"],
+                    ["right", "→"],
+                    ["up", "↑"],
+                    ["down", "↓"],
+                  ] as const
+                ).map(([direction, arrow]) => (
+                  <button
+                    key={direction}
+                    type="button"
+                    aria-label={`Rotate ${direction}`}
+                    onClick={() => rotate(direction)}
+                  >
+                    <span aria-hidden="true">{arrow}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
           </div>
         )}
       </div>

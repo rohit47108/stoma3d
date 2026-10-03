@@ -6,6 +6,8 @@
   --line: #cddbd7;
   --teal: #096d67;
   --teal-dark: #075650;
+  --amber: #a55710;
+  color-scheme: light;
   min-height: 100dvh;
   background: var(--porcelain);
   color: var(--graphite);
@@ -544,6 +546,10 @@
   display: block;
   max-width: 100%;
 }
+.scan-map-canvas canvas:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: -4px;
+}
 .scan-map-loading {
   position: absolute;
   inset: 40% 16px auto;
@@ -557,6 +563,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  max-width: calc(100% - 24px);
+  justify-content: flex-end;
 }
 .scan-map-controls > span {
   font-size: 13px;
@@ -572,6 +581,41 @@
   color: var(--graphite);
   font-size: 25px;
   cursor: pointer;
+}
+.scan-map-rotation {
+  position: relative;
+}
+.scan-map-rotation summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--graphite);
+  font-size: 13px;
+  cursor: pointer;
+}
+.scan-map-rotation summary::after {
+  content: "⌄";
+  margin-left: 8px;
+}
+.scan-map-rotation[open] summary::after {
+  content: "⌃";
+}
+.scan-map-rotation-buttons {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 44px);
+  gap: 8px;
+  padding: 8px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgb(20 45 49 / 12%);
 }
 .scan-map-fallback {
   padding: 20px;

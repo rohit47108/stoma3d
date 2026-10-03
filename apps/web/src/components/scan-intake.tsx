@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GuestSession } from "@/lib/guest-scan";
 
 export function ScanIntake({
@@ -15,13 +15,19 @@ export function ScanIntake({
   const [symptoms, setSymptoms] = useState<string[]>([]);
   const [duration, setDuration] = useState("Not sure");
   const [change, setChange] = useState("Not sure");
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const options = ["Soreness", "A patch or spot", "Bleeding", "Swelling"];
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [step]);
+
   return (
     <section className="scan-intake" aria-labelledby="intake-heading">
       <p className="scan-step-note">
         {step + 1} of {symptoms.length ? 3 : 2}
       </p>
-      <h1 id="intake-heading">
+      <h1 id="intake-heading" ref={headingRef} tabIndex={-1}>
         {step === 0
           ? "Before your scan"
           : step === 1

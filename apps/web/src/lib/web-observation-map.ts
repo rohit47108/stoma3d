@@ -1,5 +1,5 @@
 import type { MouthRegion } from "@stoma3d/contracts";
-import type { PerspectiveCamera } from "three";
+import { Spherical, type PerspectiveCamera } from "three";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import asset from "../../../../assets/mouth/manifest.json";
 import type { GuestPin } from "./guest-scan";
@@ -61,5 +61,30 @@ export function zoomWebObservationMap(
   camera.position.copy(controls.target).add(offset);
   // Manual camera transforms must update the orbit state before rendering.
   // https://threejs.org/docs/pages/OrbitControls.html
+  controls.update();
+}
+
+export type WebMapRotation = "left" | "right" | "up" | "down";
+
+export function rotateWebObservationMap(
+  camera: PerspectiveCamera,
+  controls: OrbitControls,
+  direction: WebMapRotation,
+): void {
+  const offset = camera.position.clone().sub(controls.target);
+  const spherical = new Spherical().setFromVector3(offset);
+  const step = Math.PI / 12;
+  if (direction === "left") spherical.theta -= step;
+  if (direction === "right") spherical.theta += step;
+  if (direction === "up") spherical.phi -= step;
+  if (direction === "down") spherical.phi += step;
+  spherical.phi = Math.max(
+    controls.minPolarAngle,
+    Math.min(controls.maxPolarAngle, spherical.phi),
+  );
+  // Preserve distance and avoid flipping the camera through a pole.
+  // https://threejs.org/docs/pages/Spherical.html#makeSafe
+  spherical.makeSafe();
+  camera.position.copy(controls.target).add(offset.setFromSpherical(spherical));
   controls.update();
 }
