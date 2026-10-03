@@ -11,6 +11,22 @@ const photo = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("guest analysis response handling", () => {
+  it("gives a useful retry message when the connection fails", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    await expect(
+      analyzeGuestPhoto(
+        photo,
+        "dorsal_tongue",
+        "capture-1",
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(
+      "Could not connect. Your photo is still here; try again.",
+    );
+  });
+
   it("shows the relay's recoverable service message instead of inventing analysis", async () => {
     vi.stubGlobal(
       "fetch",

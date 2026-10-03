@@ -18,6 +18,9 @@ export async function analyzeGuestPhoto(
     signal,
     cache: "no-store",
     headers: { "x-stoma3d-request-id": crypto.randomUUID() },
+  }).catch((error: unknown) => {
+    if (signal.aborted || !(error instanceof TypeError)) throw error;
+    throw new Error("Could not connect. Your photo is still here; try again.");
   });
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
