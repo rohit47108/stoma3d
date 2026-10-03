@@ -140,14 +140,18 @@ export async function decodePhoto(blob: Blob): Promise<HTMLImageElement> {
   try {
     const image = new Image();
     image.src = url;
-    await image.decode();
+    // A decode failure and a decoded image that is too large need different
+    // recovery instructions. https://developer.mozilla.org/en-US/docs/Web/API/HTMLImageElement/decode
+    try {
+      await image.decode();
+    } catch {
+      throw new Error(
+        "This browser could not read that photo. For HEIC photos, choose a JPEG copy or take a photo here.",
+      );
+    }
     if (image.naturalWidth * image.naturalHeight > 50_000_000)
       throw new Error("Choose a smaller photo.");
     return image;
-  } catch {
-    throw new Error(
-      "This browser could not read that photo. For HEIC photos, choose a JPEG copy or take a photo here.",
-    );
   } finally {
     URL.revokeObjectURL(url);
   }
