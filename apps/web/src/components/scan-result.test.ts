@@ -54,6 +54,36 @@ function unavailableCapture(): GuestCapture {
 }
 
 describe("saved photo result provenance", () => {
+  it("shows saving feedback and disables result actions while an observation saves", () => {
+    const capture = unavailableCapture();
+    capture.analysis.status = "complete";
+    capture.analysis.analysisOrigin = "live_model";
+    capture.analysis.candidateMask = {
+      polygon: [
+        [0.1, 0.1],
+        [0.5, 0.1],
+        [0.3, 0.5],
+      ],
+      normalizedArea: 0.08,
+      boundingBox: [0.1, 0.1, 0.4, 0.4],
+    };
+    const html = renderToStaticMarkup(
+      createElement(ScanResult, {
+        capture,
+        pinConfirmed: false,
+        onConfirmPin: () => undefined,
+        onRetry: () => undefined,
+        onNext: () => undefined,
+        onMap: () => undefined,
+        complete: false,
+        busy: true,
+      }),
+    );
+    expect(html).toMatch(/disabled=""[^>]*>Saving observation…/);
+    expect(html).toMatch(/disabled=""[^>]*>Next region/);
+    expect(html).toMatch(/disabled=""[^>]*>View on 3D map/);
+  });
+
   it("renders unavailable provenance and retry instead of claiming a live model or normal result", () => {
     const html = renderToStaticMarkup(
       createElement(ScanResult, {

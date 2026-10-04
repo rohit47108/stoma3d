@@ -17,6 +17,22 @@ export class GuestDataClearedError extends Error {
 export function isGuestDataClearedError(error: unknown): boolean {
   return error instanceof GuestDataClearedError;
 }
+
+export class GuestSessionConflictError extends Error {
+  readonly code = "GUEST_SESSION_CONFLICT";
+
+  constructor() {
+    super(
+      "This scan changed in another tab. Reload saved scans before trying again.",
+    );
+    this.name = "GuestSessionConflictError";
+  }
+}
+
+export function isGuestSessionConflictError(error: unknown): boolean {
+  return error instanceof GuestSessionConflictError;
+}
+
 export interface EncryptedGuestRecord {
   iv: Uint8Array<ArrayBuffer>;
   ciphertext: ArrayBuffer;
@@ -153,6 +169,7 @@ async function initializeIdentity(
 // This generation belongs to this client, not just its queue. Other tabs use
 // independent queues; every final write checks the durable generation atomically.
 let clientGeneration: string | null = null;
+let clientRevisions = new Map<string, Uint8Array<ArrayBuffer>>();
 let storageQueue: Promise<unknown> = Promise.resolve();
 function serialized<T>(operation: () => Promise<T>): Promise<T> {
   const next = storageQueue.then(operation, operation);
@@ -227,55 +244,73 @@ export function subscribeGuestDataReset(listener: () => void): () => void {
 }
 
 async function readForGeneration(db: IDBDatabase, expected: string) {
-  return new Promise<{ key: CryptoKey; records: EncryptedGuestRecord[] }>(
-    (resolve, reject) => {
-      const transaction = db.transaction(["keys", "records"], "readonly");
-      const keys = transaction.objectStore("keys");
-      let key: CryptoKey;
-      let records: EncryptedGuestRecord[] = [];
-      let cleared = false;
-      const generationRequest = keys.get(GENERATION_ID);
-      generationRequest.onsuccess = () => {
-        if (generationRequest.result !== expected) {
+  return new Promise<{
+    key: CryptoKey;
+    recordIds: IDBValidKey[];
+    records: EncryptedGuestRecord[];
+  }>((resolve, reject) => {
+    const transaction = db.transaction(["keys", "records"], "readonly");
+    const keys = transaction.objectStore("keys");
+    let key: CryptoKey;
+    let recordIds: IDBValidKey[] = [];
+    let records: EncryptedGuestRecord[] = [];
+    let cleared = false;
+    const generationRequest = keys.get(GENERATION_ID);
+    generationRequest.onsuccess = () => {
+      if (generationRequest.result !== expected) {
+        cleared = true;
+        transaction.abort();
+        return;
+      }
+      const keyRequest = keys.get(KEY_ID);
+      keyRequest.onsuccess = () => {
+        if (!keyRequest.result) {
           cleared = true;
           transaction.abort();
           return;
         }
-        const keyRequest = keys.get(KEY_ID);
-        keyRequest.onsuccess = () => {
-          if (!keyRequest.result) {
-            cleared = true;
-            transaction.abort();
-            return;
-          }
-          key = keyRequest.result as CryptoKey;
-          const recordsRequest = transaction.objectStore("records").getAll();
-          recordsRequest.onsuccess = () => {
-            records = recordsRequest.result as EncryptedGuestRecord[];
-          };
+        key = keyRequest.result as CryptoKey;
+        const recordsStore = transaction.objectStore("records");
+        const idsRequest = recordsStore.getAllKeys();
+        idsRequest.onsuccess = () => {
+          recordIds = idsRequest.result;
+        };
+        const recordsRequest = recordsStore.getAll();
+        recordsRequest.onsuccess = () => {
+          records = recordsRequest.result as EncryptedGuestRecord[];
         };
       };
-      transaction.oncomplete = () => resolve({ key, records });
-      transaction.onerror = transaction.onabort = () =>
-        reject(
-          cleared
-            ? new GuestDataClearedError()
-            : new Error("Your saved scans could not open. Try again."),
-        );
-    },
-  );
+    };
+    transaction.oncomplete = () => resolve({ key, recordIds, records });
+    transaction.onerror = transaction.onabort = () =>
+      reject(
+        cleared
+          ? new GuestDataClearedError()
+          : new Error("Your saved scans could not open. Try again."),
+      );
+  });
 }
 
-export function loadGuestSessions(): Promise<GuestSession[]> {
+function openGuestSessions(expected?: string): Promise<GuestSession[]> {
   return serialized(async () => {
     const db = await openDatabase();
     try {
-      const identity = await initializeIdentity(db);
-      const { key, records } = await readForGeneration(db, identity.generation);
+      const identity = await initializeIdentity(db, expected);
+      const { key, recordIds, records } = await readForGeneration(
+        db,
+        identity.generation,
+      );
+      const revisions = new Map<string, Uint8Array<ArrayBuffer>>();
       const sessions = await Promise.all(
-        records.map(async (record) =>
-          guestSessionSchema.parse(await decryptGuestRecord(key, record)),
-        ),
+        records.map(async (record, index) => {
+          const session = guestSessionSchema.parse(
+            await decryptGuestRecord(key, record),
+          );
+          if (recordIds[index] !== session.id)
+            throw new Error("Your saved scans could not open. Try again.");
+          revisions.set(session.id, record.iv.slice());
+          return session;
+        }),
       );
       const currentGeneration = await requestResult(
         db
@@ -286,6 +321,7 @@ export function loadGuestSessions(): Promise<GuestSession[]> {
       if (currentGeneration !== identity.generation)
         throw new GuestDataClearedError();
       clientGeneration = identity.generation;
+      clientRevisions = revisions;
       return sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     } finally {
       db.close();
@@ -293,10 +329,45 @@ export function loadGuestSessions(): Promise<GuestSession[]> {
   });
 }
 
+export function loadGuestSessions(): Promise<GuestSession[]> {
+  return openGuestSessions();
+}
+
+export function refreshGuestSessions(): Promise<GuestSession[]> {
+  // Conflict recovery is not permission to adopt a post-deletion identity.
+  // Capture before queuing, as with saves, and leave explicit resets to load.
+  const expected = clientGeneration;
+  if (!expected)
+    return Promise.reject(
+      new Error("Device storage is still opening. Try again."),
+    );
+  return openGuestSessions(expected).catch((error: unknown) => {
+    if (isGuestDataClearedError(error) && clientGeneration === expected)
+      notifyReset();
+    throw error;
+  });
+}
+
+function matchesRevision(
+  record: EncryptedGuestRecord | undefined,
+  expected: Uint8Array<ArrayBuffer> | undefined,
+): boolean {
+  if (!expected) return record === undefined;
+  return (
+    !!record &&
+    record.iv instanceof Uint8Array &&
+    record.iv.length === expected.length &&
+    record.iv.every((byte, index) => byte === expected[index])
+  );
+}
+
 export function saveGuestSession(session: GuestSession): Promise<void> {
   // Capture before joining the queue. A later clear must not give an already
   // pending save permission to use the new generation.
   const expected = clientGeneration;
+  // Queue ordering does not make a snapshot fresh. Capture its revision now so
+  // another queued save cannot silently give this older snapshot permission.
+  const expectedRevision = clientRevisions.get(session.id);
   return serialized(async () => {
     guestSessionSchema.parse(session);
     if (!expected)
@@ -311,24 +382,37 @@ export function saveGuestSession(session: GuestSession): Promise<void> {
         const transaction = db.transaction(["keys", "records"], "readwrite");
         const request = transaction.objectStore("keys").get(GENERATION_ID);
         let cleared = false;
+        let conflict = false;
         request.onsuccess = () => {
           if (request.result !== expected) {
             cleared = true;
             transaction.abort();
             return;
           }
-          transaction.objectStore("records").put(encrypted, session.id);
+          const recordsStore = transaction.objectStore("records");
+          const recordRequest = recordsStore.get(session.id);
+          recordRequest.onsuccess = () => {
+            if (!matchesRevision(recordRequest.result, expectedRevision)) {
+              conflict = true;
+              transaction.abort();
+              return;
+            }
+            recordsStore.put(encrypted, session.id);
+          };
         };
         transaction.oncomplete = () => resolve();
         transaction.onerror = transaction.onabort = () =>
           reject(
             cleared
               ? new GuestDataClearedError()
-              : new Error(
-                  "Your scan could not be saved. Check available device storage.",
-                ),
+              : conflict
+                ? new GuestSessionConflictError()
+                : new Error(
+                    "Your scan could not be saved. Check available device storage.",
+                  ),
           );
       });
+      clientRevisions.set(session.id, encrypted.iv.slice());
     } finally {
       db.close();
     }
@@ -353,6 +437,7 @@ export function clearGuestData(): Promise<void> {
       transaction.objectStore("keys").put(generation, GENERATION_ID);
       await completion;
       clientGeneration = generation;
+      clientRevisions.clear();
       notifyReset();
       if (typeof BroadcastChannel !== "undefined") {
         const channel = resetChannel ?? new BroadcastChannel(RESET_CHANNEL);

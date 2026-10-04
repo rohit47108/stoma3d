@@ -27,9 +27,9 @@ import {
   clearGuestData,
   isGuestDataClearedError,
   loadGuestSessions,
-  saveGuestSession,
   subscribeGuestDataReset,
 } from "@/lib/guest-storage";
+import { guestConflictRecovery, saveGuestUpdate } from "@/lib/guest-save";
 import { analyzeGuestPhoto } from "@/lib/scan-client";
 import { preparedPhotoFromSaved, type PreparedPhoto } from "@/lib/scan-image";
 
@@ -144,8 +144,27 @@ export function ScanWorkspace() {
   async function remember(next: GuestSession) {
     const generation = dataGenerationRef.current;
     try {
-      await saveGuestSession(next);
+      const outcome = await saveGuestUpdate(next);
       if (dataGenerationRef.current !== generation) return false;
+      if (outcome.status === "reloaded") {
+        const recovery = guestConflictRecovery(
+          stage === "result",
+          capture?.id ?? null,
+          outcome.session.captures.map((item) => item.id),
+        );
+        setSessions(outcome.sessions);
+        setSession(outcome.session);
+        setCapture((current) =>
+          current
+            ? (outcome.session.captures.find(
+                (item) => item.id === current.id,
+              ) ?? null)
+            : null,
+        );
+        if (recovery.openMap) setDestination("map");
+        setStorageProblem(recovery.message);
+        return false;
+      }
       setStorageProblem(null);
     } catch (error) {
       if (
@@ -286,8 +305,18 @@ export function ScanWorkspace() {
   }
 
   async function confirmPin() {
-    if (!session || !capture) return;
-    await remember(confirmGuestObservation(session, capture.id));
+    if (!session || !capture || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    const generation = dataGenerationRef.current;
+    try {
+      await remember(confirmGuestObservation(session, capture.id));
+    } finally {
+      if (dataGenerationRef.current === generation) {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    }
   }
 
   async function deleteData() {
@@ -523,12 +552,14 @@ export function ScanWorkspace() {
                 )}
                 {destination === "scan" && stage === "result" && capture && (
                   <ScanResult
+                    busy={busy}
                     capture={capture}
                     pinConfirmed={Boolean(
                       session?.pins.some((pin) => pin.captureId === capture.id),
                     )}
                     onConfirmPin={() => void confirmPin()}
                     onRetry={() => {
+                      if (busyRef.current) return;
                       setPhoto(
                         preparedPhotoFromSaved(
                           capture.image,
@@ -540,10 +571,12 @@ export function ScanWorkspace() {
                       setProblem(null);
                     }}
                     onNext={() => {
+                      if (busyRef.current) return;
                       setRegion(nextGuestRegion(session) ?? region);
                       setStage("capture");
                     }}
                     onMap={() => {
+                      if (busyRef.current) return;
                       setDestination("map");
                       setPhoto(null);
                     }}

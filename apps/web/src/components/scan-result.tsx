@@ -17,6 +17,7 @@ interface Props {
   onNext: () => void;
   onMap: () => void;
   complete: boolean;
+  busy?: boolean;
 }
 
 export function ScanResult({
@@ -27,6 +28,7 @@ export function ScanResult({
   onNext,
   onMap,
   complete,
+  busy = false,
 }: Props) {
   const [overlay, setOverlay] = useState(true);
   const result = capture.analysis;
@@ -108,12 +110,15 @@ export function ScanResult({
             <button
               type="button"
               className="scan-button"
-              disabled={pinConfirmed}
+              disabled={pinConfirmed || busy}
+              aria-busy={busy}
               onClick={onConfirmPin}
             >
               {pinConfirmed
                 ? "✓ Observation saved on map"
-                : "Confirm this observation"}
+                : busy
+                  ? "Saving observation…"
+                  : "Confirm this observation"}
             </button>
           </>
         )}
@@ -122,6 +127,7 @@ export function ScanResult({
             <button
               type="button"
               className="scan-button scan-button-primary"
+              disabled={busy}
               onClick={onRetry}
             >
               Try analysis again
@@ -130,12 +136,18 @@ export function ScanResult({
           <button
             type="button"
             className={`scan-button${analyzed ? " scan-button-primary" : ""}`}
+            disabled={busy}
             onClick={complete ? onMap : onNext}
           >
             {complete ? "View completed scan" : "Next region"}
           </button>
           {!complete && analyzed && (
-            <button type="button" className="scan-button" onClick={onMap}>
+            <button
+              type="button"
+              className="scan-button"
+              disabled={busy}
+              onClick={onMap}
+            >
               View on 3D map
             </button>
           )}

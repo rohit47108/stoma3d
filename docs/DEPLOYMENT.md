@@ -239,8 +239,14 @@ limits as well. Neither the relay nor inference should log request bodies.
 Guest sessions, accepted JPEGs, results, and confirmed map pins are encrypted with
 AES-256-GCM in IndexedDB. A non-extractable installation key stays in IndexedDB,
 not `localStorage`. **Clear device data** removes saved records and that key;
-the next save creates a new key. Encryption at rest does not protect against
+reopening device storage creates a new key. Encryption at rest does not protect against
 malicious JavaScript executing within the same browser origin.
+
+Each guest save checks the loaded encrypted-record revision in the same
+transaction as the deletion generation. A stale tab cannot overwrite newer
+accepted photos. On a conflict, the workspace reloads that same scan and keeps
+the unsaved review photo for a fresh retry. This refresh preserves the current
+deletion generation; it cannot bring back scans cleared in another tab.
 
 New scans use `standard_eight_region` automatically. The map works for empty,
 partial, and complete scans; coverage reaches completion only at eight accepted
