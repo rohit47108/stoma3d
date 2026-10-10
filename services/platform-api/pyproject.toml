@@ -21,6 +21,8 @@ dependencies = [
   "redis[hiredis]>=6.4,<8",
   "reportlab>=4.4,<5",
   "sqlalchemy[asyncio]>=2.0.41,<3",
+  # Keep boto3's HTTP transport above the reviewed security-fix floor.
+  "urllib3>=2.8,<3",
   "uvicorn[standard]==0.51.0",
 ]
 
