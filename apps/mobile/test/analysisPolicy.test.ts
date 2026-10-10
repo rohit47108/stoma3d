@@ -7,6 +7,7 @@ import {
 
 import {
   captureAnalysisRetryDisposition,
+  captureRegionCorrection,
   captureStorageRejectionReasons,
 } from "../src/lib/analysisPolicy";
 
@@ -70,10 +71,114 @@ function analysis(
 }
 
 describe("protected capture storage acceptance", () => {
+  it("offers an explicit supported mismatch correction only for a single standard photo", () => {
+    const mismatch = analysis({
+      selectedRegionMatches: false,
+      predictedRegion: "dorsal_tongue",
+      status: "unsupported",
+    });
+    expect(
+      captureRegionCorrection(mismatch, "left_buccal_mucosa", {
+        protocol: "standard_eight_region",
+        candidateCount: 1,
+      }),
+    ).toBe("dorsal_tongue");
+    expect(
+      captureStorageRejectionReasons(mismatch, "left_buccal_mucosa"),
+    ).not.toEqual([]);
+  });
+
+  it.each(["guided_video_sweep", "detailed_multi_angle"] as const)(
+    "does not relabel a %s capture set from one mismatched view",
+    (protocol) => {
+      expect(
+        captureRegionCorrection(
+          analysis({
+            predictedRegion: "dorsal_tongue",
+            selectedRegionMatches: false,
+            status: "unsupported",
+          }),
+          "left_buccal_mucosa",
+          { protocol, candidateCount: 1 },
+        ),
+      ).toBeNull();
+    },
+  );
+
+  it("does not suggest unconfirmed anatomy, unavailable responses, or multiple photos", () => {
+    for (const result of [
+      analysis({ anatomySupported: false, predictedRegion: "dorsal_tongue" }),
+      analysis({
+        analysisOrigin: "unavailable",
+        predictedRegion: "dorsal_tongue",
+      }),
+      analysis(),
+    ]) {
+      expect(
+        captureRegionCorrection(result, "left_buccal_mucosa", {
+          protocol: "standard_eight_region",
+          candidateCount: 1,
+        }),
+      ).toBeNull();
+    }
+    expect(
+      captureRegionCorrection(
+        analysis({
+          predictedRegion: "dorsal_tongue",
+          selectedRegionMatches: false,
+          status: "unsupported",
+        }),
+        "left_buccal_mucosa",
+        { protocol: "standard_eight_region", candidateCount: 2 },
+      ),
+    ).toBeNull();
+  });
+
+  it("never offers anatomy correction for failed, completed, rejected-quality, or face-bearing responses", () => {
+    const mismatch = analysis({
+      predictedRegion: "dorsal_tongue",
+      selectedRegionMatches: false,
+      status: "unsupported",
+    });
+    for (const result of [
+      { ...mismatch, status: "failed" as const },
+      { ...mismatch, status: "complete" as const },
+      { ...mismatch, quality: { ...mismatch.quality, accepted: false } },
+      { ...mismatch, quality: { ...mismatch.quality, faceDetected: true } },
+      {
+        ...mismatch,
+        anatomyPrediction: {
+          ...mismatch.anatomyPrediction,
+          selectedRegionMatches: true,
+        },
+      },
+    ]) {
+      expect(
+        captureRegionCorrection(result, "left_buccal_mucosa", {
+          protocol: "standard_eight_region",
+          candidateCount: 1,
+        }),
+      ).toBeNull();
+    }
+  });
+
   it("accepts when backend quality passes and supported anatomy matches", () => {
     expect(
       captureStorageRejectionReasons(analysis(), "left_buccal_mucosa"),
     ).toEqual([]);
+  });
+
+  it("does not save a face-bearing response even if it claims accepted quality", () => {
+    const result = analysis();
+    expect(
+      captureStorageRejectionReasons(
+        {
+          ...result,
+          quality: { ...result.quality, faceDetected: true },
+        },
+        "left_buccal_mucosa",
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("rejects backend quality failures and supported anatomy mismatches", () => {

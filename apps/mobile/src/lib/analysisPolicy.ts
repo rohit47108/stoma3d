@@ -1,4 +1,31 @@
-import type { AnalysisResult, MouthRegion } from "@stoma3d/contracts";
+import type {
+  AnalysisResult,
+  CaptureProtocol,
+  MouthRegion,
+} from "@stoma3d/contracts";
+
+export function captureRegionCorrection(
+  analysis: AnalysisResult,
+  selectedRegion: MouthRegion,
+  context: { protocol: CaptureProtocol; candidateCount: number },
+): MouthRegion | null {
+  const prediction = analysis.anatomyPrediction;
+  if (
+    context.protocol !== "standard_eight_region" ||
+    context.candidateCount !== 1 ||
+    analysis.analysisOrigin !== "live_model" ||
+    (analysis.status !== "abstained" && analysis.status !== "unsupported") ||
+    !analysis.quality.accepted ||
+    analysis.quality.faceDetected ||
+    !prediction.supported ||
+    prediction.selectedRegionMatches ||
+    !prediction.region ||
+    prediction.region === selectedRegion
+  ) {
+    return null;
+  }
+  return prediction.region;
+}
 
 export function captureStorageRejectionReasons(
   analysis: AnalysisResult,
@@ -7,6 +34,11 @@ export function captureStorageRejectionReasons(
   const reasons = [...analysis.quality.reasons];
   if (!analysis.quality.accepted && reasons.length === 0) {
     reasons.push("Server quality validation rejected this image.");
+  }
+  if (analysis.quality.faceDetected && analysis.quality.accepted) {
+    reasons.push(
+      "A face may be visible. Reframe to include mouth tissue only.",
+    );
   }
   if (!analysis.anatomyPrediction.supported) {
     reasons.push(

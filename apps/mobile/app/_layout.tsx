@@ -19,6 +19,10 @@ import { DISCLAIMER } from "@/constants";
 import { useCloudStore } from "@/cloud/useCloudStore";
 import { routeRequiresConsent } from "@/lib/navigationPolicy";
 import {
+  captureBackgroundCleanup,
+  shouldPurgeBackgroundTemporaryFiles,
+} from "@/lib/captureLifecycle";
+import {
   configureLocalNotifications,
   reminderCaptureId,
 } from "@/lib/notifications";
@@ -69,9 +73,13 @@ function RootLayoutContent() {
         if (cloudSessionStatus === "signed_in") void syncCloud();
         return;
       }
-      void purgeStoma3DBackgroundTemporaryFiles().catch(() => {
-        console.warn("[STOMA3D_BACKGROUND_TEMP_PURGE_FAILED]");
-      });
+      if (shouldPurgeBackgroundTemporaryFiles(nextState)) {
+        void captureBackgroundCleanup
+          .schedule(purgeStoma3DBackgroundTemporaryFiles)
+          .catch(() => {
+            console.warn("[STOMA3D_BACKGROUND_TEMP_PURGE_FAILED]");
+          });
+      }
     });
     return () => subscription.remove();
   }, [cloudSessionStatus, syncCloud]);
