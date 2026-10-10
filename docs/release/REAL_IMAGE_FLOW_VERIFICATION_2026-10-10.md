@@ -4,13 +4,15 @@ This reference records the approved usability plan’s scan tests, Android corre
 
 ## Tested source and deployment
 
-The latest software source is `f8ce5ff6a2d911b8b7aa32bcf430aa511494dacd` in the existing [Stoma3D repository](https://github.com/rohit47108/stoma3d). It corrects native report layout after the report timeout recovery in `c53cd514dd247f171f9fb95aaf1a982d52369432` and picker correction in `9028e40539cac09d32fb60f28779601329d1a731`. Public contracts, stored-data schema, encryption, signing, analysis gates, and inference deployment are unchanged.
+The latest application code is `73f02902fbf483ba8a012412272563e7edcaad7b` in the existing [Stoma3D repository](https://github.com/rohit47108/stoma3d). It corrects Home wording and recent-result selection for restored scans. It includes the report-layout correction `f8ce5ff6a2d911b8b7aa32bcf430aa511494dacd`, report timeout recovery `c53cd514dd247f171f9fb95aaf1a982d52369432`, and picker correction `9028e40539cac09d32fb60f28779601329d1a731`. Public contracts, stored-data schema, encryption, signing, analysis gates, and inference deployment are unchanged.
 
 The production website deployment `dpl_d983HvamsvKa7FHL3xZesh6WfLt3` is READY for `c53cd51`. Its [immutable deployment](https://stoma3d-bjvzsxoh3-rohit-singhs-projects-48f82479.vercel.app) serves the [public scan workspace](https://stoma3d.vercel.app/scan). The repeated browser series began on `07a5f6d516502c1a62c0c1007effd0f38668ebfe` and continued on `9028e40`, with reloads between scans. Web implementation code did not change between these commits and `c53cd51`. The recorded ten-flow series is not a new UI exercise on the later deployment.
 
 Both [TypeScript checks](https://github.com/rohit47108/stoma3d/actions/runs/38051687968) and the [repository safety audit](https://github.com/rohit47108/stoma3d/actions/runs/38051687953) succeeded for `c53cd51`.
 
 The later `f8ce5ff` production deployment `dpl_4bfBMUwNVj7Z6At6JemQmd9VQQSv` reached READY at its [immutable URL](https://stoma3d-qhc8qni87-rohit-singhs-projects-48f82479.vercel.app). Its [TypeScript checks](https://github.com/rohit47108/stoma3d/actions/runs/38081965637) and [repository safety audit](https://github.com/rohit47108/stoma3d/actions/runs/38081965657) succeeded. This increment changes native reports, not the web scan implementation; no new browser journey is attributed to this deployment.
+
+The `73f0290` production deployment `dpl_E9PN4sZTaaJNnAokkTr8Baj2ooW5` is READY at its [immutable URL](https://stoma3d-ll4m2pnyr-rohit-singhs-projects-48f82479.vercel.app). Its [TypeScript checks](https://github.com/rohit47108/stoma3d/actions/runs/38083331324) and [repository safety audit](https://github.com/rohit47108/stoma3d/actions/runs/38083331311) both succeeded. The web scan implementation is unchanged. These automated results do not replace the installed Home, PDF, and restart checks.
 
 The analysis service retains release `stoma3d-anatomy-resize-release-2026-10-09`. The tested results record anatomy `smart-om-mobilenetv3-pillow-2026.10.09` and segmentation `smart-om-autooral-unetplusplus-b4-2026.07.28`. The existing signature key and private model bundle remain in place. No inference redeployment was needed for the picker correction.
 
