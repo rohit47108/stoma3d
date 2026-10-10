@@ -206,6 +206,10 @@
   gap: 12px;
   margin-top: 24px;
 }
+.scan-report-tools .scan-text-button {
+  display: inline-flex;
+  align-items: center;
+}
 .scan-help,
 .scan-inline-note {
   color: var(--graphite-soft);

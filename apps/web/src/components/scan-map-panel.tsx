@@ -9,6 +9,7 @@ import {
   type GuestSession,
 } from "@/lib/guest-scan";
 import { ScanObservationMap } from "./scan-observation-map";
+import { ScanReportTools } from "./scan-report-tools";
 
 interface Props {
   session: GuestSession | null;
@@ -59,13 +60,15 @@ export function ScanMapPanel({
         </button>
       </div>
       {session && session.captures.length > 0 && (
-        <button
-          type="button"
-          className="scan-text-button"
-          onClick={() => window.print()}
-        >
-          Save or print report
-        </button>
+        <ScanReportTools
+          key={JSON.stringify([
+            session.id,
+            session.updatedAt,
+            session.captures.map((item) => item.id),
+            session.pins.map((item) => item.captureId),
+          ])}
+          session={session}
+        />
       )}
     </>
   );
