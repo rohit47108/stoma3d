@@ -15,6 +15,7 @@ import {
   captureAngleSchema,
   mouthRegionSchema,
   type CaptureAngle,
+  type MouthRegion,
   type QualityResult,
 } from "@stoma3d/contracts";
 
@@ -29,9 +30,19 @@ import {
   type MotionSample,
 } from "@/components/captureGuidance";
 import { Button, Card, ChoiceChip } from "@/components/Ui";
-import { captureStorageRejectionReasons } from "@/lib/analysisPolicy";
+import {
+  captureRegionCorrection,
+  captureStorageRejectionReasons,
+} from "@/lib/analysisPolicy";
 import { analyzeCapture } from "@/lib/api";
 import { captureGuideSpec } from "@/lib/captureGuide";
+import {
+  captureBackgroundCleanup,
+  capturePendingCommits,
+  createCaptureLifecycle,
+  shouldPurgeBackgroundTemporaryFiles,
+  type CaptureReviewToken,
+} from "@/lib/captureLifecycle";
 import {
   qualityForSanitizedCapture,
   sanitizeCameraCapture,
@@ -54,7 +65,11 @@ import {
   removeProtectedFile,
   removeTemporaryFile,
 } from "@/lib/secureFiles";
-import { removePickerTemporaryCopy } from "@/lib/tempFiles";
+import {
+  beginPickerTemporaryLease,
+  removePickerTemporaryCopy,
+  type PickerTemporaryLease,
+} from "@/lib/tempFiles";
 import {
   selectBestSweepFrames,
   sweepFrameRequests,
@@ -93,9 +108,19 @@ export default function CaptureRoute() {
   const theme = useAppTheme();
   const params = useLocalSearchParams<{ region?: string; angle?: string }>();
   const parsedRegion = mouthRegionSchema.safeParse(params.region);
-  const region = parsedRegion.success ? parsedRegion.data : null;
-  const detail = MOUTH_REGION_DETAILS.find((item) => item.id === region);
   const activeSessionId = useStoma3DStore((state) => state.activeSessionId);
+  const routeIdentity = `${activeSessionId}\u0000${params.region}\u0000${params.angle}`;
+  const [correctedRegion, setCorrectedRegion] = useState<{
+    region: MouthRegion;
+    routeIdentity: string;
+  } | null>(null);
+  const region =
+    correctedRegion?.routeIdentity === routeIdentity
+      ? correctedRegion.region
+      : parsedRegion.success
+        ? parsedRegion.data
+        : null;
+  const detail = MOUTH_REGION_DETAILS.find((item) => item.id === region);
   const sessions = useStoma3DStore((state) => state.sessions);
   const settings = useStoma3DStore((state) => state.settings);
   const captures = useStoma3DStore((state) => state.captures);
@@ -109,7 +134,11 @@ export default function CaptureRoute() {
   const cameraRef = useRef<CameraView>(null);
   const temporaryUris = useRef(new Set<string>());
   const mounted = useRef(true);
+  const lifecycle = useRef(createCaptureLifecycle(AppState.currentState));
+  const priorRouteIdentity = useRef(routeIdentity);
   const actionBusy = useRef(false);
+  const pickerInFlight = useRef(false);
+  const pickerTemporaryLease = useRef<PickerTemporaryLease | null>(null);
   const draftRestoreStarted = useRef(false);
   const videoPlayer = useVideoPlayer(null);
   const recordingStartedAt = useRef<number | null>(null);
@@ -135,6 +164,9 @@ export default function CaptureRoute() {
   const [moreOptions, setMoreOptions] = useState(false);
   const [cropOpen, setCropOpen] = useState(false);
   const [serverPrivacyConsent, setServerPrivacyConsent] = useState(false);
+  const [suggestedRegion, setSuggestedRegion] = useState<MouthRegion | null>(
+    null,
+  );
   const [sweepCandidates, setSweepCandidates] = useState<SweepCandidateState[]>(
     [],
   );
@@ -148,6 +180,10 @@ export default function CaptureRoute() {
   const [mouthOnlyConfirmed, setMouthOnlyConfirmed] = useState(false);
   const [regionConfirmed, setRegionConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pickerPending, setPickerPending] = useState(false);
+  const [commitPending, setCommitPending] = useState(() =>
+    capturePendingCommits.hasPending(),
+  );
   const [busyLabel, setBusyLabel] = useState("Working...");
   const [error, setError] = useState<string | null>(null);
   const [ghostEnabled, setGhostEnabled] = useState(false);
@@ -155,6 +191,7 @@ export default function CaptureRoute() {
   const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(false);
   const [ghostUri, setGhostUri] = useState<string | null>(null);
   const [ghostError, setGhostError] = useState<string | null>(null);
+  const [restoreRevision, setRestoreRevision] = useState(0);
   const session = sessions.find((item) => item.id === activeSessionId) ?? null;
   const parsedAngle = captureAngleSchema.safeParse(params.angle);
   const requestedAngle = parsedAngle.success ? parsedAngle.data : null;
@@ -169,6 +206,8 @@ export default function CaptureRoute() {
   const isSweep = session?.protocol === "guided_video_sweep";
   const preparedCandidates =
     sweepCandidates.length > 0 ? sweepCandidates : candidate ? [candidate] : [];
+  const hasReview = useRef(false);
+  hasReview.current = preparedCandidates.length > 0;
   const priorCapture =
     region === null
       ? null
@@ -177,6 +216,59 @@ export default function CaptureRoute() {
           activeSessionId,
           region,
         );
+
+  const releasePickerLease = useCallback(() => {
+    const lease = pickerTemporaryLease.current;
+    pickerTemporaryLease.current = null;
+    void lease?.release().catch(() => {
+      console.warn("[STOMA3D_PICKER_TEMP_CLEANUP_FAILED]");
+    });
+  }, []);
+
+  const clearTemporaryReview = useCallback(() => {
+    const reviewCleared = hasReview.current || actionBusy.current;
+    setCandidate(null);
+    setSweepCandidates([]);
+    setCropOpen(false);
+    setMouthOnlyConfirmed(false);
+    setRegionConfirmed(false);
+    setServerPrivacyConsent(false);
+    setSuggestedRegion(null);
+    setRejectedQuality(null);
+    setRejectedGuidance(null);
+    actionBusy.current = false;
+    draftRestoreStarted.current = false;
+    setBusy(false);
+    setRecording(false);
+    setSweepElapsedMs(0);
+    setCameraMounted(true);
+    setCameraReady(false);
+    recordingStartedAt.current = null;
+    if (reviewCleared && !capturePendingCommits.hasPending()) {
+      setError(
+        "Photo cleared when you left the app. Choose another photo or retake it.",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    const refresh = () => setCommitPending(capturePendingCommits.hasPending());
+    const unsubscribe = capturePendingCommits.subscribe(refresh);
+    refresh();
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (priorRouteIdentity.current === routeIdentity) return;
+    priorRouteIdentity.current = routeIdentity;
+    lifecycle.current.invalidateContext();
+    releasePickerLease();
+    cameraRef.current?.stopRecording();
+    for (const uri of temporaryUris.current) void removeTemporaryFile(uri);
+    temporaryUris.current.clear();
+    setCorrectedRegion(null);
+    clearTemporaryReview();
+  }, [clearTemporaryReview, releasePickerLease, routeIdentity]);
 
   useEffect(() => {
     let active = true;
@@ -228,6 +320,10 @@ export default function CaptureRoute() {
     if (
       !region ||
       !captureAngle ||
+      !appActive ||
+      !screenFocused ||
+      pickerInFlight.current ||
+      capturePendingCommits.hasPending() ||
       candidate ||
       busy ||
       draftRestoreStarted.current
@@ -237,27 +333,38 @@ export default function CaptureRoute() {
       (item) =>
         item.sessionId === activeSessionId &&
         item.region === region &&
-        item.angle === captureAngle,
+        item.angle === captureAngle &&
+        !capturePendingCommits.has(item.id) &&
+        !captures.some((capture) => capture.id === item.id),
     );
     if (!draft) return;
     draftRestoreStarted.current = true;
+    const token = lifecycle.current.beginReviewAction();
+    actionBusy.current = true;
     let active = true;
     let openedUri: string | null = null;
     setBusy(true);
     setBusyLabel("Opening saved photo...");
     void (async () => {
       try {
+        await captureBackgroundCleanup.wait();
+        if (!active || !lifecycle.current.isReviewCurrent(token)) return;
         openedUri = await decryptToTemporaryFile(
           draft.encryptedUri,
           draft.mimeType === "image/png" ? "png" : "jpg",
           `capture:${draft.id}`,
         );
+        if (!active || !lifecycle.current.isReviewCurrent(token)) return;
         const restored = await sanitizeSelectedImage(openedUri);
-        if (!active || !mounted.current) {
+        if (!active || !lifecycle.current.isReviewCurrent(token)) {
           await removeTemporaryFile(restored.uri);
           return;
         }
         temporaryUris.current.add(restored.uri);
+        setMouthOnlyConfirmed(false);
+        setRegionConfirmed(false);
+        setServerPrivacyConsent(false);
+        setError(null);
         setCandidate({
           capture: {
             ...restored,
@@ -280,19 +387,38 @@ export default function CaptureRoute() {
           capturedAt: draft.capturedAt,
         });
       } catch {
-        if (active)
+        if (active && lifecycle.current.isReviewCurrent(token))
           setError(
             "The saved photo could not open. Choose a new photo or try the camera.",
           );
       } finally {
         await removeTemporaryFile(openedUri);
-        if (active) setBusy(false);
+        if (active && lifecycle.current.isReviewCurrent(token)) {
+          setBusy(false);
+          actionBusy.current = false;
+        }
       }
     })();
     return () => {
       active = false;
+      if (lifecycle.current.isReviewCurrent(token)) {
+        lifecycle.current.invalidateReview();
+        draftRestoreStarted.current = false;
+        actionBusy.current = false;
+        setBusy(false);
+      }
     };
-  }, [activeSessionId, captureAngle, captureDrafts, region]);
+  }, [
+    activeSessionId,
+    appActive,
+    captureAngle,
+    captureDrafts,
+    captures,
+    commitPending,
+    region,
+    restoreRevision,
+    screenFocused,
+  ]);
 
   useEffect(() => {
     if (!settings.voiceInstructions || !detail) return;
@@ -306,28 +432,47 @@ export default function CaptureRoute() {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      lifecycle.current.dispose();
+      releasePickerLease();
       for (const uri of temporaryUris.current) void removeTemporaryFile(uri);
       temporaryUris.current.clear();
     };
-  }, []);
+  }, [releasePickerLease]);
 
   useFocusEffect(
     useCallback(() => {
+      lifecycle.current.focus();
       setScreenFocused(true);
-      return () => setScreenFocused(false);
-    }, []),
+      return () => {
+        lifecycle.current.blur();
+        releasePickerLease();
+        cameraRef.current?.stopRecording();
+        void videoPlayer.replaceAsync(null).catch(() => undefined);
+        for (const uri of temporaryUris.current) void removeTemporaryFile(uri);
+        temporaryUris.current.clear();
+        if (mounted.current) {
+          clearTemporaryReview();
+          setScreenFocused(false);
+        }
+      };
+    }, [clearTemporaryReview, releasePickerLease, videoPlayer]),
   );
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
+      lifecycle.current.setAppState(state);
       setAppActive(state === "active");
       if (state !== "active") {
         cameraRef.current?.stopRecording();
         setCameraReady(false);
       }
+      if (shouldPurgeBackgroundTemporaryFiles(state)) {
+        void videoPlayer.replaceAsync(null).catch(() => undefined);
+        clearTemporaryReview();
+      }
     });
     return () => subscription.remove();
-  }, []);
+  }, [clearTemporaryReview, videoPlayer]);
 
   useEffect(() => {
     if (!recording) return undefined;
@@ -346,7 +491,11 @@ export default function CaptureRoute() {
       !autoCaptureEnabled ||
       isSweep ||
       !permission?.granted ||
+      !screenFocused ||
+      !appActive ||
       !cameraReady ||
+      pickerPending ||
+      commitPending ||
       busy ||
       candidate ||
       sweepCandidates.length > 0 ||
@@ -360,11 +509,15 @@ export default function CaptureRoute() {
     return () => clearTimeout(timeout);
   }, [
     autoCaptureEnabled,
+    appActive,
     busy,
     candidate,
     isSweep,
     permission?.granted,
+    screenFocused,
     cameraReady,
+    pickerPending,
+    commitPending,
     stability,
     sweepCandidates.length,
   ]);
@@ -374,6 +527,8 @@ export default function CaptureRoute() {
     setGhostError(null);
     if (
       !ghostEnabled ||
+      !appActive ||
+      !screenFocused ||
       !priorCapture?.encryptedUri ||
       preparedCandidates.length > 0
     ) {
@@ -381,34 +536,46 @@ export default function CaptureRoute() {
     }
     let active = true;
     let temporary: string | null = null;
+    const token = lifecycle.current.reviewToken();
+    const encryptedUri = priorCapture.encryptedUri;
     const extension = priorCapture.mimeType === "image/png" ? "png" : "jpg";
-    void decryptToTemporaryFile(
-      priorCapture.encryptedUri,
-      extension,
-      `capture:${priorCapture.id}`,
-    )
-      .then(async (uri) => {
-        if (!active) {
+    // Own each effect's asynchronous output until its cleanup runs.
+    // https://react.dev/reference/react/useEffect#fetching-data-with-effects
+    void (async () => {
+      try {
+        await captureBackgroundCleanup.wait();
+        if (!active || !lifecycle.current.isReviewCurrent(token)) return;
+        const uri = await decryptToTemporaryFile(
+          encryptedUri,
+          extension,
+          `capture:${priorCapture.id}`,
+        );
+        if (!active || !lifecycle.current.isReviewCurrent(token)) {
           await removeTemporaryFile(uri);
           return;
         }
         temporary = uri;
+        temporaryUris.current.add(uri);
         setGhostUri(uri);
-      })
-      .catch(() => {
-        if (active) {
+      } catch {
+        if (active && lifecycle.current.isReviewCurrent(token)) {
           setGhostError(
             "The earlier protected image could not be opened as an alignment guide.",
           );
           setGhostEnabled(false);
         }
-      });
+      }
+    })();
     return () => {
       active = false;
+      if (temporary) temporaryUris.current.delete(temporary);
       void removeTemporaryFile(temporary);
     };
   }, [
     preparedCandidates.length,
+    appActive,
+    routeIdentity,
+    screenFocused,
     ghostEnabled,
     priorCapture?.encryptedUri,
     priorCapture?.id,
@@ -449,18 +616,44 @@ export default function CaptureRoute() {
     };
   };
 
+  const removeReviewedDraft = async (
+    item: CandidateState,
+    token: CaptureReviewToken,
+  ) => {
+    const draftId = item.draftId;
+    if (!draftId) return;
+    await removeCaptureDraft(draftId);
+    if (!lifecycle.current.isReviewCurrent(token)) return;
+    setCandidate((current) =>
+      current && current.draftId === draftId
+        ? { ...current, draftId: undefined, encryptedDraftUri: undefined }
+        : current,
+    );
+    setSweepCandidates((current) =>
+      current.map((entry) =>
+        entry.draftId === draftId
+          ? { ...entry, draftId: undefined, encryptedDraftUri: undefined }
+          : entry,
+      ),
+    );
+  };
+
   const prepareCandidate = async (
     capture: SanitizedCapture,
     guidance: CaptureGuidanceSnapshot,
+    token: CaptureReviewToken,
   ) => {
-    temporaryUris.current.add(capture.uri);
-    setBusyLabel("Checking photo...");
-    const inspected = await inspectCapture(capture);
-    if (!mounted.current) {
+    const discardIfStale = async () => {
+      if (lifecycle.current.isReviewCurrent(token)) return false;
       await removeTemporaryFile(capture.uri);
       temporaryUris.current.delete(capture.uri);
-      return;
-    }
+      return true;
+    };
+    temporaryUris.current.add(capture.uri);
+    if (await discardIfStale()) return;
+    setBusyLabel("Checking photo...");
+    const inspected = await inspectCapture(capture);
+    if (await discardIfStale()) return;
     const { capture: checkedCapture, quality } = inspected;
     if (settings.haptics) {
       await Haptics.notificationAsync(
@@ -469,17 +662,33 @@ export default function CaptureRoute() {
           : Haptics.NotificationFeedbackType.Warning,
       ).catch(() => undefined);
     }
-    await Promise.all(
-      preparedCandidates
-        .filter((item) => item.capture.uri !== capture.uri)
-        .map(async (item) => {
+    if (await discardIfStale()) return;
+    const previousCandidates = preparedCandidates.filter(
+      (item) => item.capture.uri !== capture.uri,
+    );
+    try {
+      const draftRemovals = await Promise.allSettled(
+        previousCandidates.map((item) => removeReviewedDraft(item, token)),
+      );
+      if (await discardIfStale()) return;
+      if (draftRemovals.some((result) => result.status === "rejected")) {
+        throw new Error("The previous photo could not be cleared. Try again.");
+      }
+      await Promise.all(
+        previousCandidates.map(async (item) => {
           await removeTemporaryFile(item.capture.uri);
           temporaryUris.current.delete(item.capture.uri);
-          if (item.draftId) await removeCaptureDraft(item.draftId);
         }),
-    );
+      );
+    } catch (cleanupError) {
+      await removeTemporaryFile(capture.uri);
+      temporaryUris.current.delete(capture.uri);
+      throw cleanupError;
+    }
+    if (await discardIfStale()) return;
     setRejectedQuality(null);
     setRejectedGuidance(null);
+    setSuggestedRegion(null);
     setSweepCandidates([]);
     setCandidate({
       capture: checkedCapture,
@@ -496,7 +705,14 @@ export default function CaptureRoute() {
   };
 
   const takePhoto = async () => {
-    if (actionBusy.current) return;
+    if (
+      actionBusy.current ||
+      pickerInFlight.current ||
+      capturePendingCommits.hasPending()
+    )
+      return;
+    const token = lifecycle.current.beginReviewAction();
+    if (!lifecycle.current.isReviewCurrent(token)) return;
     actionBusy.current = true;
     setError(null);
     setBusy(true);
@@ -517,17 +733,21 @@ export default function CaptureRoute() {
           facing === "front",
         ),
         guidance,
+        token,
       );
     } catch (captureError) {
-      setError(
-        captureError instanceof Error
-          ? captureError.message
-          : "Capture failed.",
-      );
+      if (lifecycle.current.isReviewCurrent(token))
+        setError(
+          captureError instanceof Error
+            ? captureError.message
+            : "Capture failed.",
+        );
     } finally {
       await removeTemporaryFile(rawPhotoUri);
-      setBusy(false);
-      actionBusy.current = false;
+      if (lifecycle.current.isReviewCurrent(token)) {
+        setBusy(false);
+        actionBusy.current = false;
+      }
     }
   };
   autoCaptureAction.current = () => {
@@ -535,11 +755,19 @@ export default function CaptureRoute() {
   };
 
   const recordSweep = async () => {
-    if (actionBusy.current) return;
+    if (
+      actionBusy.current ||
+      pickerInFlight.current ||
+      capturePendingCommits.hasPending()
+    )
+      return;
+    const token = lifecycle.current.beginReviewAction();
+    if (!lifecycle.current.isReviewCurrent(token)) return;
     actionBusy.current = true;
     setError(null);
     setRejectedQuality(null);
     setRejectedGuidance(null);
+    setSuggestedRegion(null);
     setBusy(true);
     setBusyLabel("Recording guided sweep...");
     setRecording(true);
@@ -561,13 +789,16 @@ export default function CaptureRoute() {
       );
       if (!video?.uri) throw new Error("The camera did not return a sweep.");
       rawVideoUri = video.uri;
+      if (!lifecycle.current.isReviewCurrent(token)) return;
       const requests = sweepFrameRequests(durationMs);
       setBusyLabel("Selecting the clearest frames...");
       await videoPlayer.replaceAsync({ uri: video.uri });
+      if (!lifecycle.current.isReviewCurrent(token)) return;
       const thumbnails = await videoPlayer.generateThumbnailsAsync(
         requests.map((request) => request.timeMs / 1_000),
         { maxWidth: 2_048, maxHeight: 2_048 },
       );
+      if (!lifecycle.current.isReviewCurrent(token)) return;
       if (thumbnails.length !== requests.length) {
         throw new Error(
           "The recorded sweep did not produce every needed frame.",
@@ -578,16 +809,23 @@ export default function CaptureRoute() {
         if (!request) continue;
         const context = ImageManipulator.manipulate(thumbnail);
         const rendered = await context.renderAsync();
+        if (!lifecycle.current.isReviewCurrent(token)) return;
         const saved = await rendered.saveAsync({
           compress: 0.92,
           format: SaveFormat.JPEG,
         });
         renderedFrameUris.push(saved.uri);
+        if (!lifecycle.current.isReviewCurrent(token)) return;
         const sanitized = await sanitizeVideoFrame(
           saved.uri,
           facing === "front",
         );
         temporaryUris.current.add(sanitized.uri);
+        if (!lifecycle.current.isReviewCurrent(token)) {
+          await removeTemporaryFile(sanitized.uri);
+          temporaryUris.current.delete(sanitized.uri);
+          return;
+        }
         try {
           const inspected = await inspectCapture(sanitized);
           inspectedFrames.push({
@@ -598,6 +836,7 @@ export default function CaptureRoute() {
             frameTimeMs: request.timeMs,
             guidance: sweepGuidance,
           });
+          if (!lifecycle.current.isReviewCurrent(token)) return;
         } catch (privacyError) {
           await removeTemporaryFile(sanitized.uri);
           throw new Error(
@@ -624,6 +863,7 @@ export default function CaptureRoute() {
           .filter((frame) => !selectedUris.has(frame.capture.uri))
           .map((frame) => removeTemporaryFile(frame.capture.uri)),
       );
+      if (!lifecycle.current.isReviewCurrent(token)) return;
       setCandidate(best[0] ?? null);
       setSweepCandidates(best);
       setMouthOnlyConfirmed(false);
@@ -634,17 +874,21 @@ export default function CaptureRoute() {
         ).catch(() => undefined);
       }
     } catch (sweepError) {
-      setCandidate(null);
-      setSweepCandidates([]);
-      setMouthOnlyConfirmed(false);
-      setRegionConfirmed(false);
-      setError(
-        sweepError instanceof Error
-          ? sweepError.message
-          : "The guided sweep could not be prepared.",
-      );
+      if (lifecycle.current.isReviewCurrent(token)) {
+        setCandidate(null);
+        setSweepCandidates([]);
+        setMouthOnlyConfirmed(false);
+        setRegionConfirmed(false);
+        setError(
+          sweepError instanceof Error
+            ? sweepError.message
+            : "The guided sweep could not be prepared.",
+        );
+      }
     } finally {
-      await videoPlayer.replaceAsync(null).catch(() => undefined);
+      if (lifecycle.current.isReviewCurrent(token)) {
+        await videoPlayer.replaceAsync(null).catch(() => undefined);
+      } else selectedUris.clear();
       await Promise.all([
         removeTemporaryFile(rawVideoUri),
         ...renderedFrameUris.map((uri) => removeTemporaryFile(uri)),
@@ -652,10 +896,12 @@ export default function CaptureRoute() {
           .filter((frame) => !selectedUris.has(frame.capture.uri))
           .map((frame) => removeTemporaryFile(frame.capture.uri)),
       ]);
-      recordingStartedAt.current = null;
-      setRecording(false);
-      setBusy(false);
-      actionBusy.current = false;
+      if (lifecycle.current.isReviewCurrent(token)) {
+        recordingStartedAt.current = null;
+        setRecording(false);
+        setBusy(false);
+        actionBusy.current = false;
+      }
     }
   };
 
@@ -671,50 +917,130 @@ export default function CaptureRoute() {
   };
 
   const choosePhoto = async () => {
-    if (actionBusy.current) return;
+    if (
+      actionBusy.current ||
+      pickerInFlight.current ||
+      capturePendingCommits.hasPending()
+    )
+      return;
+    const routeToken = lifecycle.current.routeToken();
+    if (!lifecycle.current.isRouteCurrent(routeToken)) return;
+    pickerInFlight.current = true;
+    setPickerPending(true);
     actionBusy.current = true;
     setBusy(true);
     setBusyLabel("Opening photo library...");
     setError(null);
     let pickerTemporaryUri: string | null = null;
+    let lease: PickerTemporaryLease | null = null;
+    let token: CaptureReviewToken | null = null;
     try {
+      await captureBackgroundCleanup.wait();
+      if (!lifecycle.current.isRouteCurrent(routeToken)) return;
+      lease = await beginPickerTemporaryLease();
+      if (!lifecycle.current.isRouteCurrent(routeToken)) return;
+      pickerTemporaryLease.current = lease;
       const asset = await pickSelectedPhoto(ImagePicker);
       if (!asset) return;
       pickerTemporaryUri = asset.uri;
+      // Android's system picker may background this app. Its new selection is
+      // safe to prepare only after foregrounding and the older purge finishes.
+      await lifecycle.current.waitForForeground();
+      if (!lifecycle.current.isRouteCurrent(routeToken)) return;
+      await captureBackgroundCleanup.wait();
+      if (!lifecycle.current.isRouteCurrent(routeToken)) return;
+      token = lifecycle.current.beginReviewAction();
+      if (!lifecycle.current.isReviewCurrent(token)) return;
+      actionBusy.current = true;
+      setBusy(true);
       setBusyLabel("Checking selected image...");
       await prepareCandidate(
         await sanitizeSelectedImage(asset.uri),
         guidanceSnapshot("imported_photo"),
+        token,
       );
     } catch (selectionError) {
-      setError(
-        selectionError instanceof Error
-          ? selectionError.message
-          : "The selected image could not be prepared.",
-      );
+      if (
+        token
+          ? lifecycle.current.isReviewCurrent(token)
+          : lifecycle.current.isRouteCurrent(routeToken)
+      )
+        setError(
+          selectionError instanceof Error
+            ? selectionError.message
+            : "The selected image could not be prepared.",
+        );
     } finally {
-      await removePickerTemporaryCopy(pickerTemporaryUri);
-      setBusy(false);
-      actionBusy.current = false;
+      try {
+        try {
+          await removePickerTemporaryCopy(pickerTemporaryUri);
+        } finally {
+          await lease?.release();
+        }
+      } catch {
+        if (lifecycle.current.isRouteCurrent(routeToken)) {
+          setError(
+            "Temporary photo cleanup failed. Close and reopen the app before choosing another photo.",
+          );
+        }
+      } finally {
+        if (pickerTemporaryLease.current === lease)
+          pickerTemporaryLease.current = null;
+        pickerInFlight.current = false;
+        if (mounted.current) setPickerPending(false);
+        if (
+          token
+            ? lifecycle.current.isReviewCurrent(token)
+            : lifecycle.current.isRouteCurrent(routeToken)
+        ) {
+          setBusy(false);
+          actionBusy.current = false;
+          setRestoreRevision((value) => value + 1);
+        }
+      }
     }
   };
 
   const retake = async () => {
-    await Promise.all(
-      preparedCandidates.map(async (item) => {
-        await removeTemporaryFile(item.capture.uri);
-        temporaryUris.current.delete(item.capture.uri);
-        if (item.draftId) await removeCaptureDraft(item.draftId);
-      }),
-    );
-    setCandidate(null);
-    setSweepCandidates([]);
-    setRejectedQuality(null);
-    setRejectedGuidance(null);
-    setMouthOnlyConfirmed(false);
-    setRegionConfirmed(false);
-    setCropOpen(false);
-    setServerPrivacyConsent(false);
+    if (actionBusy.current) return;
+    const token = lifecycle.current.beginReviewAction();
+    if (!lifecycle.current.isReviewCurrent(token)) return;
+    actionBusy.current = true;
+    setBusy(true);
+    try {
+      const draftRemovals = await Promise.allSettled(
+        preparedCandidates.map((item) => removeReviewedDraft(item, token)),
+      );
+      if (!lifecycle.current.isReviewCurrent(token)) return;
+      if (draftRemovals.some((result) => result.status === "rejected")) {
+        throw new Error("Draft removal failed.");
+      }
+      await Promise.all(
+        preparedCandidates.map(async (item) => {
+          await removeTemporaryFile(item.capture.uri);
+          temporaryUris.current.delete(item.capture.uri);
+        }),
+      );
+      if (!lifecycle.current.isReviewCurrent(token)) return;
+      setCandidate(null);
+      setSweepCandidates([]);
+      setRejectedQuality(null);
+      setRejectedGuidance(null);
+      setSuggestedRegion(null);
+      setMouthOnlyConfirmed(false);
+      setRegionConfirmed(false);
+      setCropOpen(false);
+      setServerPrivacyConsent(false);
+      setError(null);
+    } catch {
+      if (lifecycle.current.isReviewCurrent(token))
+        setError("The photo could not be cleared. Try again.");
+    } finally {
+      if (lifecycle.current.isReviewCurrent(token)) {
+        setBusy(false);
+        actionBusy.current = false;
+      }
+    }
   };
 
   const acceptAndAnalyze = async () => {
@@ -729,15 +1055,19 @@ export default function CaptureRoute() {
           item.capture.privacyStatus === "unavailable" &&
           !canSendForServerPrivacyCheck(item.capture, serverPrivacyConsent),
       ) ||
-      actionBusy.current
+      actionBusy.current ||
+      capturePendingCommits.hasPending()
     )
       return;
+    const token = lifecycle.current.beginReviewAction();
+    if (!lifecycle.current.isReviewCurrent(token)) return;
     actionBusy.current = true;
     setBusy(true);
     setBusyLabel("Analyzing photo...");
     setError(null);
     const protectedUris: string[] = [];
     const committedDraftIds: string[] = [];
+    let releaseCommit: (() => void) | null = null;
     let captureCommitted = false;
     try {
       const entries: Array<{
@@ -761,6 +1091,7 @@ export default function CaptureRoute() {
             `capture:${captureId}`,
           );
           if (createdDraft) protectedUris.push(draftEncryptedUri);
+          if (!lifecycle.current.isReviewCurrent(token)) return;
           await saveCaptureDraft({
             id: captureId,
             sessionId: activeSessionId,
@@ -778,6 +1109,7 @@ export default function CaptureRoute() {
           });
           if (createdDraft)
             protectedUris.splice(protectedUris.indexOf(draftEncryptedUri), 1);
+          if (!lifecycle.current.isReviewCurrent(token)) return;
           setCandidate({
             ...prepared,
             draftId: captureId,
@@ -793,6 +1125,7 @@ export default function CaptureRoute() {
           inputOrigin: "live_capture",
           localQuality: prepared.quality,
         });
+        if (!lifecycle.current.isReviewCurrent(token)) return;
         if (analysis.analysisOrigin === "unavailable") {
           throw new Error(
             analysis.abstentionReasons[0] ??
@@ -806,6 +1139,7 @@ export default function CaptureRoute() {
         if (serverRejectionReasons.length > 0) {
           if (draftEncryptedUri) {
             await removeCaptureDraft(captureId);
+            if (!lifecycle.current.isReviewCurrent(token)) return;
             setCandidate({
               ...prepared,
               draftId: undefined,
@@ -817,6 +1151,12 @@ export default function CaptureRoute() {
             accepted: false,
             reasons: serverRejectionReasons,
           });
+          setSuggestedRegion(
+            captureRegionCorrection(analysis, region, {
+              protocol: session.protocol,
+              candidateCount: preparedCandidates.length,
+            }),
+          );
           setRejectedGuidance(prepared.guidance);
           throw new Error(
             serverRejectionReasons.map(humanizeResultReason).join(" "),
@@ -833,6 +1173,7 @@ export default function CaptureRoute() {
           (await encryptFile(prepared.capture.uri, `capture:${captureId}`));
         if (draftEncryptedUri) committedDraftIds.push(captureId);
         else protectedUris.push(encryptedUri);
+        if (!lifecycle.current.isReviewCurrent(token)) return;
         entries.push({
           capture: {
             id: captureId,
@@ -859,6 +1200,11 @@ export default function CaptureRoute() {
           analysis,
         });
       }
+      if (!lifecycle.current.isReviewCurrent(token)) return;
+      releaseCommit = capturePendingCommits.begin(
+        entries.map(({ capture }) => capture.id),
+      );
+      setBusyLabel("Saving photo...");
       await addCaptures(entries);
       captureCommitted = true;
       await Promise.all(committedDraftIds.map((id) => removeCaptureDraft(id)));
@@ -871,39 +1217,60 @@ export default function CaptureRoute() {
             capture.angle === "primary" || capture.angle === "straight",
         ) ?? entries[0];
       if (!primary) throw new Error("The accepted capture set is empty.");
+      if (!lifecycle.current.isReviewCurrent(token)) return;
       router.replace({
         pathname: "/result/[captureId]",
         params: { captureId: primary.capture.id },
       });
     } catch (captureError) {
-      setError(
-        captureError instanceof Error
-          ? captureError.message
-          : "Could not protect and analyze this capture.",
-      );
+      if (lifecycle.current.isReviewCurrent(token))
+        setError(
+          captureError instanceof Error
+            ? captureError.message
+            : "Could not protect and analyze this capture.",
+        );
     } finally {
-      if (!captureCommitted) {
-        await Promise.all(protectedUris.map((uri) => removeProtectedFile(uri)));
+      try {
+        if (!captureCommitted) {
+          await Promise.all(
+            protectedUris.map((uri) => removeProtectedFile(uri)),
+          );
+        }
+      } finally {
+        releaseCommit?.();
+        if (lifecycle.current.isReviewCurrent(token)) {
+          setBusy(false);
+          actionBusy.current = false;
+        }
       }
-      setBusy(false);
-      actionBusy.current = false;
     }
   };
 
   const switchCamera = async () => {
-    if (busy || recording || actionBusy.current) return;
+    if (
+      busy ||
+      recording ||
+      actionBusy.current ||
+      pickerInFlight.current ||
+      capturePendingCommits.hasPending()
+    )
+      return;
+    const token = lifecycle.current.beginReviewAction();
+    if (!lifecycle.current.isReviewCurrent(token)) return;
     actionBusy.current = true;
     setError(null);
     setCameraReady(false);
     await cameraRef.current?.pausePreview().catch(() => undefined);
+    if (!lifecycle.current.isReviewCurrent(token)) return;
     setCameraMounted(false);
     requestAnimationFrame(() => {
-      if (!mounted.current) return;
+      if (!lifecycle.current.isReviewCurrent(token)) return;
       const next = facing === "front" ? "back" : "front";
       cameraForSession.set(session.id, next);
       setFacing(next);
       requestAnimationFrame(() => {
-        if (mounted.current) setCameraMounted(true);
+        if (!lifecycle.current.isReviewCurrent(token)) return;
+        setCameraMounted(true);
         actionBusy.current = false;
       });
     });
@@ -913,24 +1280,32 @@ export default function CaptureRoute() {
     edit: Parameters<typeof editSanitizedCapture>[1],
   ) => {
     if (!candidate || actionBusy.current) return;
+    const token = lifecycle.current.beginReviewAction();
+    if (!lifecycle.current.isReviewCurrent(token)) return;
     actionBusy.current = true;
     setBusy(true);
     setBusyLabel("Checking photo...");
     setError(null);
     try {
       const edited = await editSanitizedCapture(candidate.capture, edit);
-      await prepareCandidate(edited, candidate.guidance);
+      await prepareCandidate(edited, candidate.guidance, token);
     } catch {
-      setError(
-        "The photo could not be edited. Your original photo is still here.",
-      );
+      if (lifecycle.current.isReviewCurrent(token))
+        setError(
+          "The photo could not be edited. Your original photo is still here.",
+        );
     } finally {
-      setBusy(false);
-      actionBusy.current = false;
+      if (lifecycle.current.isReviewCurrent(token)) {
+        setBusy(false);
+        actionBusy.current = false;
+      }
     }
   };
 
   const progress = scanProgress(captures, session.id);
+  const suggestedDetail = MOUTH_REGION_DETAILS.find(
+    (item) => item.id === suggestedRegion,
+  );
   const privacyUnavailable = candidate?.capture.privacyStatus === "unavailable";
   const needsCrop = candidate?.capture.privacyStatus === "face_detected";
   const serverPrivacyReady = candidate
@@ -945,7 +1320,7 @@ export default function CaptureRoute() {
         <Button
           label="Back"
           variant="ghost"
-          disabled={busy}
+          disabled={busy || commitPending}
           onPress={() => router.back()}
         />
       }
@@ -1050,9 +1425,15 @@ export default function CaptureRoute() {
                   : "Take photo"
             }
             icon={recording ? "stop-circle-outline" : "camera"}
-            loading={busy && !recording}
-            loadingLabel={busyLabel}
-            disabled={!permission?.granted || !cameraReady}
+            loading={(busy && !recording) || commitPending}
+            loadingLabel={commitPending ? "Saving photo..." : busyLabel}
+            disabled={
+              !permission?.granted ||
+              !cameraReady ||
+              pickerPending ||
+              commitPending ||
+              (busy && !recording)
+            }
             onPress={() => {
               if (recording) cameraRef.current?.stopRecording();
               else if (isSweep) void recordSweep();
@@ -1065,7 +1446,7 @@ export default function CaptureRoute() {
                 label="Choose photo"
                 icon="images-outline"
                 variant="ghost"
-                disabled={busy}
+                disabled={busy || pickerPending || commitPending}
                 onPress={() => void choosePhoto()}
                 style={styles.secondaryAction}
               />
@@ -1074,7 +1455,9 @@ export default function CaptureRoute() {
               label="Switch camera"
               icon="camera-reverse-outline"
               variant="ghost"
-              disabled={busy || !permission?.granted}
+              disabled={
+                busy || pickerPending || commitPending || !permission?.granted
+              }
               onPress={() => void switchCamera()}
               style={styles.secondaryAction}
             />
@@ -1083,7 +1466,7 @@ export default function CaptureRoute() {
             label={moreOptions ? "Hide options" : "More options"}
             icon="options-outline"
             variant="ghost"
-            disabled={busy}
+            disabled={busy || commitPending}
             onPress={() => setMoreOptions((value) => !value)}
           />
           {moreOptions ? (
@@ -1189,6 +1572,27 @@ export default function CaptureRoute() {
             >
               {rejectedQuality.reasons.map(humanizeResultReason).join(" ")}
             </Text>
+          ) : null}
+          {suggestedDetail ? (
+            <Button
+              label={`Change to ${suggestedDetail.shortLabel.toLowerCase()}`}
+              variant="secondary"
+              disabled={busy}
+              onPress={() => {
+                lifecycle.current.invalidateReview();
+                setCorrectedRegion({
+                  region: suggestedDetail.id,
+                  routeIdentity,
+                });
+                setSuggestedRegion(null);
+                setMouthOnlyConfirmed(false);
+                setRegionConfirmed(false);
+                setServerPrivacyConsent(false);
+                setRejectedQuality(null);
+                setRejectedGuidance(null);
+                setError(null);
+              }}
+            />
           ) : null}
           {!isSweep ? (
             <View style={styles.secondaryActions}>
