@@ -1,5 +1,4 @@
 import * as Crypto from "expo-crypto";
-import * as FileSystem from "expo-file-system/legacy";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
@@ -24,6 +23,10 @@ import {
   oralObservationMapMarkup,
 } from "@/lib/reportMarkup";
 import { humanizeResultReason } from "@/lib/resultCopy";
+import {
+  beginReportTemporaryLease,
+  removeReportTemporaryFile,
+} from "@/lib/tempFiles";
 import type {
   CaptureRecord,
   IntakeProfile,
@@ -91,19 +94,28 @@ async function reportImageBase64(capture: CaptureRecord): Promise<string> {
 
 async function printReportToFile(html: string): Promise<{ uri: string }> {
   let timeout: ReturnType<typeof setTimeout> | null = null;
+  let expired = false;
+  const releaseRenderer = beginReportTemporaryLease();
   try {
     return await Promise.race([
-      Print.printToFileAsync({ html, base64: false }),
+      Promise.resolve()
+        .then(() => Print.printToFileAsync({ html, base64: false }))
+        .then(async (printed) => {
+          // Timing out does not cancel the native renderer. Discard its late
+          // plaintext output instead of leaving it outside the encrypted vault.
+          if (expired) {
+            await removeReportTemporaryFile(printed.uri).catch(() => {
+              console.warn("[STOMA3D_LATE_REPORT_CLEANUP_FAILED]");
+            });
+          }
+          return printed;
+        })
+        .finally(releaseRenderer),
       new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () =>
-            reject(
-              new Error(
-                "The report renderer did not finish. Temporary files were removed; try generating the report again.",
-              ),
-            ),
-          REPORT_PRINT_TIMEOUT_MS,
-        );
+        timeout = setTimeout(() => {
+          expired = true;
+          reject(new Error("Report creation took too long. Try again."));
+        }, REPORT_PRINT_TIMEOUT_MS);
       }),
     ]);
   } finally {
@@ -407,6 +419,7 @@ export async function generateEncryptedObservationReport(
 
   let plaintextPdfUri: string | null = null;
   const reportId = Crypto.randomUUID();
+  const releaseReport = beginReportTemporaryLease();
   try {
     const printed = await printReportToFile(html);
     plaintextPdfUri = printed.uri;
@@ -418,8 +431,12 @@ export async function generateEncryptedObservationReport(
       sessionId: input.session.id,
     };
   } finally {
-    if (plaintextPdfUri) {
-      await FileSystem.deleteAsync(plaintextPdfUri, { idempotent: true });
+    try {
+      if (plaintextPdfUri) {
+        await removeReportTemporaryFile(plaintextPdfUri);
+      }
+    } finally {
+      releaseReport();
     }
   }
 }

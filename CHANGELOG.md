@@ -6,6 +6,9 @@ All notable Stoma3D source-release changes are recorded here.
 
 ### Fixed
 
+- Reports finishing after a timeout now clean up their temporary PDF, with a
+  deletion retry and next-launch recovery if device storage fails. Active report
+  creation stays protected from background cleanup.
 - Android photo selection no longer shows a false "photo cleared" warning when
   the system picker returns or is canceled. A newly prepared photo clears an
   older interruption warning without bypassing review or temporary-file cleanup.

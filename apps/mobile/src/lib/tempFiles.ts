@@ -54,6 +54,53 @@ export async function removePickerTemporaryCopy(
   await removeFileIfPresent(uri);
 }
 
+// Expo Print writes to cache/Print on both native platforms. Keep that folder
+// out of lifecycle sweeps while rendering or encrypting a PDF, including a
+// renderer that is still running after the user-facing timeout.
+let activeReportOperations = 0;
+
+export function beginReportTemporaryLease(): () => void {
+  activeReportOperations += 1;
+  let released = false;
+  return () => {
+    if (!released) {
+      released = true;
+      activeReportOperations -= 1;
+    }
+  };
+}
+
+export async function removeReportTemporaryFile(uri: string): Promise<void> {
+  const directory = `${cacheRoot()}Print/`;
+  const name = uri.slice(directory.length);
+  if (!uri.startsWith(directory) || !/^[\w-]+\.pdf$/i.test(name)) {
+    throw new Error("The temporary report location is invalid.");
+  }
+  try {
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  } catch {
+    // A transient file-system failure gets one bounded retry. If it still
+    // fails, the cache folder is a durable recovery target on the next sweep.
+    await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  }
+}
+
+async function purgeReportTemporaryFiles(): Promise<void> {
+  if (activeReportOperations > 0) return;
+  const directory = `${cacheRoot()}Print/`;
+  if (!(await FileSystem.getInfoAsync(directory)).exists) return;
+  const names = await FileSystem.readDirectoryAsync(directory);
+  // Recheck after native I/O, and delete only enumerated files. A newly started
+  // renderer must never lose its output to a recursive directory deletion.
+  if (activeReportOperations > 0) return;
+  await Promise.all(
+    names
+      .filter((name) => /^[\w-]+\.pdf$/i.test(name))
+      .map((name) => removeReportTemporaryFile(`${directory}${name}`)),
+  );
+}
+
 export interface PickerTemporaryLease {
   release(): Promise<void>;
 }
@@ -119,6 +166,7 @@ export async function purgeStoma3DBackgroundTemporaryFiles(): Promise<void> {
       (["capture", "preview"] as const).map(stoma3DTempDirectory),
     ),
     withPickerFiles(purgePickerTemporaryFiles),
+    purgeReportTemporaryFiles(),
   ]);
 }
 
@@ -131,5 +179,6 @@ export async function purgeStoma3DTemporaryFiles(): Promise<void> {
       activePickerLease = null;
       await purgeDirectories([`${cacheRoot()}ImagePicker/`]);
     }),
+    purgeReportTemporaryFiles(),
   ]);
 }
