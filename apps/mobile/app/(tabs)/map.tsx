@@ -10,6 +10,8 @@ import { Button, Card, EmptyState, SectionTitle } from "@/components/Ui";
 import {
   buildObservationReplayFrames,
   buildRegionObservationSummaries,
+  capturesForObservationPin,
+  observationReplayIndexForCapture,
 } from "@/lib/observationMap";
 import { animationDurationMs } from "@/lib/motionPreferences";
 import { useStoma3DStore } from "@/store/useStoma3DStore";
@@ -42,23 +44,37 @@ export default function MapRoute() {
   const pins = useStoma3DStore((state) => state.pins);
   const activeSessionId = useStoma3DStore((state) => state.activeSessionId);
   const [selected, setSelected] = useState<MouthRegion | null>(null);
-  const { region } = useLocalSearchParams<{ region?: string }>();
+  // Use this tab's own result request, not background routes' search params.
+  // Source: https://docs.expo.dev/router/reference/url-parameters/#local-versus-global-url-parameters
+  const { region, captureId } = useLocalSearchParams<{
+    region?: string;
+    captureId?: string;
+  }>();
+  const requestedRegion =
+    captures.find((capture) => capture.id === captureId)?.region ?? region;
   useEffect(() => {
-    const matched = MOUTH_REGION_DETAILS.find((detail) => detail.id === region);
+    const matched = MOUTH_REGION_DETAILS.find(
+      (detail) => detail.id === requestedRegion,
+    );
     if (matched) setSelected(matched.id);
-  }, [region]);
-  const [replayIndex, setReplayIndex] = useState(0);
+  }, [captureId, requestedRegion]);
   const [replaying, setReplaying] = useState(false);
 
   const frames = useMemo(
     () => buildObservationReplayFrames(captures, analyses, pins),
     [analyses, captures, pins],
   );
+  const requestedReplayIndex = observationReplayIndexForCapture(
+    frames,
+    captures,
+    captureId,
+  );
+  const [replayIndex, setReplayIndex] = useState(requestedReplayIndex);
 
   useEffect(() => {
-    setReplayIndex(Math.max(0, frames.length - 1));
+    setReplayIndex(requestedReplayIndex);
     setReplaying(false);
-  }, [frames.length]);
+  }, [captureId, frames.length, requestedReplayIndex]);
 
   useEffect(() => {
     if (!replaying || reduceMotion || frames.length < 2) return undefined;
@@ -307,19 +323,17 @@ export default function MapRoute() {
               Confirmed observation links
             </Text>
             {regionPins.map((pin) => {
-              const latestCaptureId = pin.captureIds
-                .slice()
-                .sort((left, right) =>
-                  (capturesById.get(left)?.capturedAt ?? "").localeCompare(
-                    capturesById.get(right)?.capturedAt ?? "",
-                  ),
-                )
-                .at(-1);
+              const linkedCaptures = capturesForObservationPin(
+                pin,
+                capturesById,
+                frame?.cutoffAt,
+              );
+              const latestCaptureId = linkedCaptures.at(-1)?.id;
               return (
                 <Pressable
                   key={pin.id}
                   accessibilityRole="button"
-                  accessibilityLabel={`${statusLabel(pin.status)} observation. First noted ${formatDate(pin.firstObservedAt)}. ${pin.captureIds.length} linked observations.`}
+                  accessibilityLabel={`${statusLabel(pin.status)} observation. First noted ${formatDate(pin.firstObservedAt)}. ${linkedCaptures.length} linked observation${linkedCaptures.length === 1 ? "" : "s"}.`}
                   disabled={!latestCaptureId}
                   onPress={() => {
                     if (!latestCaptureId) return;
@@ -350,8 +364,8 @@ export default function MapRoute() {
                       style={[styles.pinMeta, { color: theme.secondaryText }]}
                     >
                       First noted {formatDate(pin.firstObservedAt)} ·{" "}
-                      {pin.captureIds.length} linked observation
-                      {pin.captureIds.length === 1 ? "" : "s"}
+                      {linkedCaptures.length} linked observation
+                      {linkedCaptures.length === 1 ? "" : "s"}
                     </Text>
                   </View>
                   <Ionicons

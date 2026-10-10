@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   Alert,
@@ -62,6 +62,16 @@ export default function ResultRoute() {
   const captures = useStoma3DStore((state) => state.captures);
   const comparisons = useStoma3DStore((state) => state.comparisons);
   const currentProfile = useStoma3DStore((state) => state.profile);
+  const [confirmingPin, setConfirmingPin] = useState(false);
+  const [pinConfirmationError, setPinConfirmationError] = useState<
+    string | null
+  >(null);
+  // A ref guards immediate repeat taps before the busy state re-renders.
+  // Source: https://react.dev/reference/react/useRef#referencing-a-value-with-a-ref
+  const pinConfirmationPending = useRef(false);
+  const [opening, setOpening] = useState(false);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+  const navigationPending = useRef(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewEpoch, setPreviewEpoch] = useState(0);
@@ -141,12 +151,22 @@ export default function ResultRoute() {
     };
   }, [capture?.encryptedUri, capture?.id, capture?.mimeType, previewEpoch]);
 
+  const navigateBack = () => {
+    if (!pinConfirmationPending.current && !navigationPending.current)
+      router.back();
+  };
+
   if (!capture)
     return (
       <Screen
         title="Result unavailable"
         action={
-          <Button label="Back" variant="ghost" onPress={() => router.back()} />
+          <Button
+            label="Back"
+            variant="ghost"
+            disabled={confirmingPin || opening}
+            onPress={navigateBack}
+          />
         }
       >
         <Card>
@@ -268,6 +288,50 @@ export default function ResultRoute() {
     : [];
   const symptomCompleteness = intakeCompleteness(sessionProfile);
 
+  const confirmPin = async () => {
+    if (
+      pinConfirmationPending.current ||
+      navigationPending.current ||
+      pinConfirmed
+    )
+      return;
+    pinConfirmationPending.current = true;
+    setConfirmingPin(true);
+    setPinConfirmationError(null);
+    try {
+      await confirmObservationPin(capture.id);
+    } catch (error) {
+      setPinConfirmationError(
+        error instanceof Error
+          ? error.message
+          : "The map location could not be saved. Try again.",
+      );
+    } finally {
+      pinConfirmationPending.current = false;
+      setConfirmingPin(false);
+    }
+  };
+
+  const openInSession = async (navigate: () => void) => {
+    if (pinConfirmationPending.current || navigationPending.current) return;
+    navigationPending.current = true;
+    setOpening(true);
+    setNavigationError(null);
+    try {
+      await setActiveSession(capture.sessionId);
+      navigate();
+    } catch (error) {
+      setNavigationError(
+        error instanceof Error
+          ? error.message
+          : "The selected scan could not be saved. Try again.",
+      );
+    } finally {
+      navigationPending.current = false;
+      setOpening(false);
+    }
+  };
+
   const retryAnalysis = async () => {
     if (!canRetry || !previewUri) return;
     setRetrying(true);
@@ -308,7 +372,7 @@ export default function ResultRoute() {
       );
       if (disposition === "reject") {
         await discardCapture(capture.id);
-        setActiveSession(capture.sessionId);
+        await setActiveSession(capture.sessionId);
         Alert.alert(
           "Retake required",
           `${rejectionReasons.join(" ")} The rejected protected image and any report containing it were removed.`,
@@ -345,7 +409,12 @@ export default function ResultRoute() {
       title="Your result"
       eyebrow={label}
       action={
-        <Button label="Back" variant="ghost" onPress={() => router.back()} />
+        <Button
+          label="Back"
+          variant="ghost"
+          disabled={confirmingPin || opening}
+          onPress={navigateBack}
+        />
       }
     >
       <View>
@@ -475,12 +544,14 @@ export default function ResultRoute() {
               label="Retake this region"
               icon="camera-outline"
               variant="secondary"
+              disabled={confirmingPin || opening}
               onPress={() => {
-                setActiveSession(capture.sessionId);
-                router.push({
-                  pathname: "/capture/[region]",
-                  params: { region: capture.region },
-                });
+                void openInSession(() =>
+                  router.push({
+                    pathname: "/capture/[region]",
+                    params: { region: capture.region },
+                  }),
+                );
               }}
             />
           ) : null}
@@ -506,14 +577,16 @@ export default function ResultRoute() {
         <Card accent={pinConfirmed ? "teal" : "amber"}>
           <SectionTitle
             title={
-              pinConfirmed
-                ? "Observation pin confirmed"
-                : "Confirm map location"
+              confirmingPin
+                ? "Saving map location"
+                : pinConfirmed
+                  ? "Observation pin confirmed"
+                  : "Confirm map location"
             }
             subtitle="Confirm this area to add it to your map."
             icon={pinConfirmed ? "location" : "location-outline"}
           />
-          {pinConfirmed ? (
+          {pinConfirmed && !confirmingPin ? (
             <Text style={[styles.limitation, { color: theme.secondaryText }]}>
               This observation is saved on your map.
             </Text>
@@ -522,9 +595,22 @@ export default function ResultRoute() {
               label="Add observation to map"
               icon="location-outline"
               variant="secondary"
-              onPress={() => confirmObservationPin(capture.id)}
+              loading={confirmingPin}
+              loadingLabel="Saving map location..."
+              disabled={confirmingPin || opening}
+              onPress={() => {
+                void confirmPin();
+              }}
             />
           )}
+          {pinConfirmationError ? (
+            <Text
+              accessibilityRole="alert"
+              style={[styles.error, { color: theme.danger }]}
+            >
+              {pinConfirmationError}
+            </Text>
+          ) : null}
         </Card>
       ) : null}
       {detailsOpen && analysis?.candidateMask ? (
@@ -873,26 +959,40 @@ export default function ResultRoute() {
           </Card>
         </>
       ) : null}
+      {navigationError ? (
+        <Text
+          accessibilityRole="alert"
+          style={[styles.error, { color: theme.danger }]}
+        >
+          {navigationError}
+        </Text>
+      ) : null}
       <Button
         label={next ? "Next region" : "Create report"}
         icon={next ? "arrow-forward" : "document-text-outline"}
+        disabled={confirmingPin || opening}
+        loading={opening}
         onPress={() => {
-          setActiveSession(capture.sessionId);
-          if (next)
-            router.replace({ pathname: "/capture/[region]", params: next });
-          else router.push("/report");
+          void openInSession(() => {
+            if (next)
+              router.replace({ pathname: "/capture/[region]", params: next });
+            else router.push("/report");
+          });
         }}
       />
       <Button
         label="View on 3D map"
         variant="secondary"
         icon="cube-outline"
-        onPress={() =>
+        disabled={confirmingPin || opening}
+        onPress={() => {
+          if (pinConfirmationPending.current || navigationPending.current)
+            return;
           router.push({
             pathname: "/(tabs)/map",
             params: { region: capture.region, captureId: capture.id },
-          })
-        }
+          });
+        }}
       />
       <Text style={[styles.limitation, { color: theme.secondaryText }]}>
         {DISCLAIMER}

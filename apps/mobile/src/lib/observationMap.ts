@@ -327,6 +327,40 @@ export function buildObservationReplayFrames(
     });
 }
 
+export function observationReplayIndexForCapture(
+  frames: readonly ObservationReplayFrame[],
+  captures: readonly MapCapture[],
+  captureId?: string,
+): number {
+  const capture = captures.find(
+    (item) => item.id === captureId && isUsableCapture(item),
+  );
+  const requestedIndex = capture
+    ? frames.findIndex((frame) => frame.sessionId === capture.sessionId)
+    : -1;
+  return requestedIndex >= 0 ? requestedIndex : Math.max(0, frames.length - 1);
+}
+
+export function capturesForObservationPin(
+  pin: ObservationPin,
+  capturesById: ReadonlyMap<string, MapCapture>,
+  cutoffAt?: string,
+): MapCapture[] {
+  return [...new Set(pin.captureIds)]
+    .flatMap((id) => {
+      const capture = capturesById.get(id);
+      return capture &&
+        capture.region === pin.region &&
+        isUsableCapture(capture, cutoffAt)
+        ? [capture]
+        : [];
+    })
+    .sort(
+      (left, right) =>
+        Date.parse(left.capturedAt) - Date.parse(right.capturedAt),
+    );
+}
+
 export function nextScanPathRegion(
   completedRegions: readonly MouthRegion[],
   selectedRegion: MouthRegion | null,
