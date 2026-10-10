@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -22,6 +25,23 @@ async def test_local_token_validates_required_claims(settings) -> None:
     claims = await TokenValidator(settings).validate(token)
     assert claims.subject == "auth0|patient-7"
     assert claims.roles == frozenset({"patient", "ignored-future-role"})
+
+
+async def test_deeply_nested_token_is_a_validation_error(settings) -> None:
+    header = base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').rstrip(b"=")
+    depth = 10_000
+    payload = b'{"nested":' + b"[" * depth + b"0" + b"]" * depth + b"}"
+    signing_input = header + b"." + base64.urlsafe_b64encode(payload).rstrip(b"=")
+    signature = hmac.new(
+        settings.local_test_signing_secret.get_secret_value().encode(),
+        signing_input,
+        hashlib.sha256,
+    ).digest()
+    token = (
+        signing_input + b"." + base64.urlsafe_b64encode(signature).rstrip(b"=")
+    ).decode("ascii")
+    with pytest.raises(TokenValidationError):
+        await TokenValidator(settings).validate(token)
 
 
 @pytest.mark.parametrize("changed", ["issuer", "audience", "expired"])
