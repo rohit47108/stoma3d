@@ -190,6 +190,16 @@ These builds still emit upstream Gradle deprecation and terminal-color warnings.
 
 The current iOS JavaScript export also completed with exit code zero, producing one 8.7 MB bundle and 42 assets. This verifies bundling for iOS, not native iPhone compilation, Apple signing, installation, or camera behavior. Expo login remains deferred by the owner.
 
+## October 9 dependency and test follow-up
+
+The Python workflow for `b88fdfb` passed its application checks but failed the production dependency audit. The platform export contained advisories in PyJWT 2.13.0 and urllib3 2.7.0; its subsequent container checks were skipped, not successful. Targeted updates now lock PyJWT 2.15.1 and urllib3 2.8.0, with matching platform dependency floors and standalone locks. Authentication logic and the deployed inference service are unchanged. See the [dependency review](DEPENDENCY_REVIEW_2026-10-09.md) for sources and checks.
+
+The final local full Python run passed 349 tests, with one PostgreSQL-only skip and the existing Starlette test-client warning. It includes the optional research test. All three frozen production dependency exports passed pip-audit without ignored advisories. Ruff lint and format passed for 161 files; all standalone locks and the byte-identical inference requirements export were verified.
+
+A timing-sensitive worker test failed once in the first full run and passed in isolation. It now synchronizes on two observed lease renewals instead of expecting them within a 25 ms processor sleep, retaining a bounded timeout and checking identity, TTL, and completion. Worker implementation code is unchanged. Source changes are in `5bf4bb5` (PyJWT), `01ae028` (urllib3), and `7543531` (the test).
+
+These local checks do not substitute for the pending physical-phone and installed-app coverage above. GitHub workflow and latest website deployment outcomes are recorded only after they finish.
+
 ## Earlier Android emulator results
 
 The rebuilt Android application package (APK) used the production inference endpoint and current response-verification key. These checks ran on an emulator, not a physical phone:

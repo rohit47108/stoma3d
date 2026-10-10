@@ -32804,7 +32804,7 @@
       "version": "2.5.0"
     },
     {
-      "bom-ref": "pypi:pyjwt@2.13.0",
+      "bom-ref": "pypi:pyjwt@2.15.1",
       "externalReferences": [
         {
           "type": "website",
@@ -32829,9 +32829,9 @@
           "value": "true"
         }
       ],
-      "purl": "pkg:pypi/pyjwt@2.13.0",
+      "purl": "pkg:pypi/pyjwt@2.15.1",
       "type": "library",
-      "version": "2.13.0"
+      "version": "2.15.1"
     },
     {
       "bom-ref": "pypi:pyparsing@3.3.2",
@@ -34226,7 +34226,7 @@
       "version": "5.4.4"
     },
     {
-      "bom-ref": "pypi:urllib3@2.7.0",
+      "bom-ref": "pypi:urllib3@2.8.0",
       "externalReferences": [
         {
           "type": "website",
@@ -34251,9 +34251,9 @@
           "value": "true"
         }
       ],
-      "purl": "pkg:pypi/urllib3@2.7.0",
+      "purl": "pkg:pypi/urllib3@2.8.0",
       "type": "library",
-      "version": "2.7.0"
+      "version": "2.8.0"
     },
     {
       "bom-ref": "pypi:uvicorn@0.51.0",
@@ -35692,7 +35692,7 @@
         "pypi:pygit2@1.19.3",
         "pypi:pygments@2.20.0",
         "pypi:pygtrie@2.5.0",
-        "pypi:pyjwt@2.13.0",
+        "pypi:pyjwt@2.15.1",
         "pypi:pyparsing@3.3.2",
         "pypi:pypdf@6.15.0",
         "pypi:pytest-asyncio@1.4.0",
@@ -35739,7 +35739,7 @@
         "pypi:typing-inspection@0.4.2",
         "pypi:tzdata@2026.3",
         "pypi:tzlocal@5.4.4",
-        "pypi:urllib3@2.7.0",
+        "pypi:urllib3@2.8.0",
         "pypi:uvicorn@0.51.0",
         "pypi:uvloop@0.22.1",
         "pypi:vine@5.1.0",
@@ -35770,7 +35770,7 @@
       },
       {
         "name": "stoma3d:uv-lock-sha256",
-        "value": "d566d47f83ee64f2a38024da9437163b81747f9817a22b9d518f624094f499b3"
+        "value": "09c0c426ad263a8185b8c9af20d558bd9b1e04282475f7b0ce61f107e621761b"
       }
     ],
     "tools": {
