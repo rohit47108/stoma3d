@@ -117,6 +117,8 @@ test("builds an installable release with the JavaScript bundle embedded", () => 
       "-PreactNativeArchitectures=arm64-v8a",
       "-Pkotlin.incremental=false",
       "-Pstoma3d.disableHermesSourceMaps=true",
+      "-Dorg.gradle.jvmargs=-Xmx4096m",
+      "--max-workers=2",
       "--stacktrace",
     ],
     executable: "gradlew.bat",
@@ -140,6 +142,8 @@ test("runs release bundling and native compilation in one short-path build", () 
           "-PreactNativeArchitectures=x86_64",
           "-Pkotlin.incremental=false",
           "-Pstoma3d.disableHermesSourceMaps=true",
+          "-Dorg.gradle.jvmargs=-Xmx4096m",
+          "--max-workers=2",
           "--stacktrace",
         ],
         directory: "O:\\apps\\mobile\\android",
@@ -153,6 +157,25 @@ test("rejects an Android architecture that could inject Gradle arguments", () =>
   assert.throws(
     () => createGradleInvocation("build", "x86_64 --offline"),
     /Unsupported Android architecture/,
+  );
+});
+
+test("bounds release packaging memory without overriding debug builds", () => {
+  for (const mode of ["build-release", "install-release"]) {
+    const invocation = createGradleInvocation(mode, "arm64-v8a");
+    assert.ok(invocation.arguments.includes("-Dorg.gradle.jvmargs=-Xmx4096m"));
+    assert.ok(invocation.arguments.includes("--max-workers=2"));
+    assert.doesNotThrow(() =>
+      formatWindowsBatchCommand(
+        "O:\\apps\\mobile\\android\\gradlew.bat",
+        invocation.arguments,
+      ),
+    );
+  }
+  assert.ok(
+    !createGradleInvocation("build", "x86_64").arguments.some((argument) =>
+      argument.startsWith("-Dorg.gradle.jvmargs="),
+    ),
   );
 });
 

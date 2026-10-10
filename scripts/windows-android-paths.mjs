@@ -177,7 +177,14 @@ export function createGradleInvocation(mode, architecture) {
     "-Pkotlin.incremental=false",
   ];
   if (mode.endsWith("-release")) {
-    arguments_.push("-Pstoma3d.disableHermesSourceMaps=true");
+    // Release APK compression needs more heap than the default 2 GB. Bound
+    // workers so packaging does not compete with every available CPU core.
+    // https://docs.gradle.org/current/userguide/build_environment.html
+    arguments_.push(
+      "-Pstoma3d.disableHermesSourceMaps=true",
+      "-Dorg.gradle.jvmargs=-Xmx4096m",
+      "--max-workers=2",
+    );
   }
   arguments_.push("--stacktrace");
 
