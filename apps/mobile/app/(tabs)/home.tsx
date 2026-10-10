@@ -20,6 +20,7 @@ export default function HomeRoute() {
   const setActiveSession = useStoma3DStore((state) => state.setActiveSession);
   const [menuOpen, setMenuOpen] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [openingError, setOpeningError] = useState<string | null>(null);
   const openingRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
@@ -41,17 +42,28 @@ export default function HomeRoute() {
   const recentRegion = MOUTH_REGION_DETAILS.find(
     (region) => region.id === recent?.region,
   );
-  const begin = () => {
+  const begin = async () => {
     if (openingRef.current) return;
     openingRef.current = true;
     setOpening(true);
-    if (!unfinished) {
-      router.push("/onboarding");
-    } else {
-      setActiveSession(unfinished.id);
-      const next = nextScanCapture(unfinished, captures);
-      if (next) router.push({ pathname: "/capture/[region]", params: next });
-      else router.push("/(tabs)/scan");
+    setOpeningError(null);
+    try {
+      if (!unfinished) {
+        router.push("/onboarding");
+      } else {
+        await setActiveSession(unfinished.id);
+        const next = nextScanCapture(unfinished, captures);
+        if (next) router.push({ pathname: "/capture/[region]", params: next });
+        else router.push("/(tabs)/scan");
+      }
+    } catch (error) {
+      setOpeningError(
+        error instanceof Error
+          ? error.message
+          : "The selected scan could not be saved. Try again.",
+      );
+      openingRef.current = false;
+      setOpening(false);
     }
   };
   return (
@@ -84,19 +96,28 @@ export default function HomeRoute() {
             label="Settings"
             icon="options-outline"
             variant="ghost"
-            onPress={() => router.push("/(tabs)/settings")}
+            disabled={opening}
+            onPress={() => {
+              if (!openingRef.current) router.push("/(tabs)/settings");
+            }}
           />
           <Button
             label="Help and learning"
             icon="book-outline"
             variant="ghost"
-            onPress={() => router.push("/(tabs)/learn")}
+            disabled={opening}
+            onPress={() => {
+              if (!openingRef.current) router.push("/(tabs)/learn");
+            }}
           />
           <Button
             label="Account and sync"
             icon="cloud-outline"
             variant="ghost"
-            onPress={() => router.push("/account")}
+            disabled={opening}
+            onPress={() => {
+              if (!openingRef.current) router.push("/account");
+            }}
           />
         </View>
       ) : null}
@@ -165,8 +186,18 @@ export default function HomeRoute() {
           label={unfinished ? "Continue scan" : "Start scan"}
           icon="arrow-forward"
           disabled={opening}
-          onPress={begin}
+          onPress={() => {
+            void begin();
+          }}
         />
+        {openingError ? (
+          <Text
+            accessibilityRole="alert"
+            style={[styles.body, { color: theme.danger }]}
+          >
+            {openingError}
+          </Text>
+        ) : null}
         <Text style={[styles.note, { color: theme.secondaryText }]}>
           Saved on this device. No account needed.
         </Text>
@@ -174,7 +205,10 @@ export default function HomeRoute() {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Explore the 3D mouth map"
-        onPress={() => router.push("/(tabs)/map")}
+        disabled={opening}
+        onPress={() => {
+          if (!openingRef.current) router.push("/(tabs)/map");
+        }}
         style={({ pressed }) => [
           styles.linkRow,
           { borderBottomColor: theme.border },
@@ -202,12 +236,14 @@ export default function HomeRoute() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Open ${recentRegion?.label ?? "recent"} result`}
-            onPress={() =>
+            disabled={opening}
+            onPress={() => {
+              if (openingRef.current) return;
               router.push({
                 pathname: "/result/[captureId]",
                 params: { captureId: recent.id },
-              })
-            }
+              });
+            }}
             style={({ pressed }) => [
               styles.linkRow,
               { borderBottomColor: theme.border },

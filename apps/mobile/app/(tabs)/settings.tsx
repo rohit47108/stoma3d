@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { type Href, router } from "expo-router";
 
@@ -15,6 +15,7 @@ import { useStoma3DStore } from "@/store/useStoma3DStore";
 import { useAppTheme } from "@/theme";
 import { CONTRACT_VERSION } from "@stoma3d/contracts";
 import { useCloudStore } from "@/cloud/useCloudStore";
+import type { AccessibilitySettings } from "@/types";
 
 export default function SettingsRoute() {
   const theme = useAppTheme();
@@ -22,10 +23,33 @@ export default function SettingsRoute() {
   const updateSettings = useStoma3DStore((state) => state.updateSettings);
   const deleteEverything = useStoma3DStore((state) => state.deleteEverything);
   const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const mutationPending = useRef(false);
   const cloud = useCloudStore();
   const guidance = bundledGuidanceStatus();
+  const busy = saving || deleting || cloud.busy;
+  const saveSettings = async (change: Partial<AccessibilitySettings>) => {
+    if (mutationPending.current || cloud.busy) return;
+    mutationPending.current = true;
+    setSaving(true);
+    setSettingsError(null);
+    try {
+      await updateSettings(change);
+    } catch (error) {
+      setSettingsError(
+        error instanceof Error
+          ? error.message
+          : "The local settings could not be saved. Try again.",
+      );
+    } finally {
+      mutationPending.current = false;
+      setSaving(false);
+    }
+  };
 
-  const confirmDeletion = () =>
+  const confirmDeletion = () => {
+    if (mutationPending.current || cloud.busy) return;
     Alert.alert(
       "Delete all Stoma3D data?",
       "This removes the encrypted database, captures, reports, comparisons, and consent record, then rotates installation keys. This cannot be undone.",
@@ -35,10 +59,13 @@ export default function SettingsRoute() {
           text: "Delete all",
           style: "destructive",
           onPress: () => {
+            if (mutationPending.current || cloud.busy) return;
+            mutationPending.current = true;
             setDeleting(true);
             void deleteEverything()
               .then(() => router.replace("/(tabs)/home"))
               .catch(() => {
+                mutationPending.current = false;
                 setDeleting(false);
                 Alert.alert(
                   "Deletion incomplete",
@@ -49,6 +76,7 @@ export default function SettingsRoute() {
         },
       ],
     );
+  };
 
   return (
     <Screen
@@ -57,10 +85,22 @@ export default function SettingsRoute() {
         <Button
           label="Done"
           variant="ghost"
-          onPress={() => router.replace("/(tabs)/home")}
+          disabled={busy}
+          onPress={() => {
+            if (!mutationPending.current && !cloud.busy)
+              router.replace("/(tabs)/home");
+          }}
         />
       }
     >
+      {settingsError ? (
+        <Text
+          accessibilityRole="alert"
+          style={[styles.body, { color: theme.danger }]}
+        >
+          {settingsError}
+        </Text>
+      ) : null}
       <Card accent={cloud.sessionStatus === "signed_in" ? "teal" : undefined}>
         <SectionTitle
           title={
@@ -91,7 +131,11 @@ export default function SettingsRoute() {
           }
           variant="secondary"
           icon="arrow-forward-outline"
-          onPress={() => router.push("/account" as Href)}
+          disabled={busy}
+          onPress={() => {
+            if (!mutationPending.current && !cloud.busy)
+              router.push("/account" as Href);
+          }}
         />
       </Card>
       <Card>
@@ -103,19 +147,28 @@ export default function SettingsRoute() {
         <ToggleRow
           label="High contrast"
           value={settings.highContrast}
-          onValueChange={(value) => updateSettings({ highContrast: value })}
+          disabled={busy}
+          onValueChange={(value) => {
+            void saveSettings({ highContrast: value });
+          }}
         />
         <ToggleRow
           label="Larger key text"
           description="Adds extra size to shared headings, buttons, choices, and settings."
           value={settings.largeText}
-          onValueChange={(value) => updateSettings({ largeText: value })}
+          disabled={busy}
+          onValueChange={(value) => {
+            void saveSettings({ largeText: value });
+          }}
         />
         <ToggleRow
           label="Reduce motion"
           description="Stops automatic map replay and comparison time-lapse. Manual controls remain available."
           value={settings.reducedMotion}
-          onValueChange={(value) => updateSettings({ reducedMotion: value })}
+          disabled={busy}
+          onValueChange={(value) => {
+            void saveSettings({ reducedMotion: value });
+          }}
         />
         <Text style={[styles.controlLabel, { color: theme.text }]}>
           Animation speed
@@ -125,13 +178,19 @@ export default function SettingsRoute() {
             label="Slow (0.5x)"
             accessibilityRole="radio"
             selected={settings.animationSpeed === "slow"}
-            onPress={() => updateSettings({ animationSpeed: "slow" })}
+            disabled={busy}
+            onPress={() => {
+              void saveSettings({ animationSpeed: "slow" });
+            }}
           />
           <ChoiceChip
             label="Standard (1x)"
             accessibilityRole="radio"
             selected={settings.animationSpeed === "standard"}
-            onPress={() => updateSettings({ animationSpeed: "standard" })}
+            disabled={busy}
+            onPress={() => {
+              void saveSettings({ animationSpeed: "standard" });
+            }}
           />
         </View>
         <Text style={[styles.controlHint, { color: theme.secondaryText }]}>
@@ -141,19 +200,26 @@ export default function SettingsRoute() {
         <ToggleRow
           label="Haptic capture cues"
           value={settings.haptics}
-          onValueChange={(value) => updateSettings({ haptics: value })}
+          disabled={busy}
+          onValueChange={(value) => {
+            void saveSettings({ haptics: value });
+          }}
         />
         <ToggleRow
           label="Read capture instructions"
           value={settings.voiceInstructions}
-          onValueChange={(value) =>
-            updateSettings({ voiceInstructions: value })
-          }
+          disabled={busy}
+          onValueChange={(value) => {
+            void saveSettings({ voiceInstructions: value });
+          }}
         />
         <ToggleRow
           label="Caregiver-assisted mode"
           value={settings.caregiverMode}
-          onValueChange={(value) => updateSettings({ caregiverMode: value })}
+          disabled={busy}
+          onValueChange={(value) => {
+            void saveSettings({ caregiverMode: value });
+          }}
         />
         <ToggleRow
           label="Limited product analytics"
@@ -163,10 +229,17 @@ export default function SettingsRoute() {
               : "Sign in to choose this optional account setting. It stays off while you use Stoma3D locally."
           }
           value={settings.analyticsOptIn}
-          disabled={cloud.sessionStatus !== "signed_in" || cloud.busy}
-          onValueChange={(value) =>
-            void cloud.setAnalyticsOptIn(value).catch(() => undefined)
-          }
+          disabled={cloud.sessionStatus !== "signed_in" || busy}
+          onValueChange={(value) => {
+            if (mutationPending.current || cloud.busy) return;
+            void cloud
+              .setAnalyticsOptIn(value)
+              .catch(() =>
+                setSettingsError(
+                  "The account analytics preference could not be saved. Review account settings and try again.",
+                ),
+              );
+          }}
         />
       </Card>
       <Card accent="amber">
@@ -187,13 +260,21 @@ export default function SettingsRoute() {
           label="Open deployed model card"
           variant="secondary"
           icon="document-outline"
-          onPress={() => router.push("/model-card")}
+          disabled={busy}
+          onPress={() => {
+            if (!mutationPending.current && !cloud.busy)
+              router.push("/model-card");
+          }}
         />
         <Button
           label="View future roadmap"
           variant="ghost"
           icon="map-outline"
-          onPress={() => router.push("/roadmap")}
+          disabled={busy}
+          onPress={() => {
+            if (!mutationPending.current && !cloud.busy)
+              router.push("/roadmap");
+          }}
         />
       </Card>
       <Card accent="coral">
@@ -207,6 +288,7 @@ export default function SettingsRoute() {
           variant="danger"
           icon="trash"
           loading={deleting}
+          disabled={busy}
           onPress={confirmDeletion}
         />
       </Card>

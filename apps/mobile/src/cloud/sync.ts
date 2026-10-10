@@ -8,14 +8,16 @@ import {
   cloudAccountRebindPending,
   cloudMetadata,
   confirmCloudAccountRebind,
-  loadPersistedState,
   markCloudOutboxAttempt,
   readCloudOutbox,
   stageCloudOutbox,
   updateCloudMetadata,
   type CloudOutboxInsert,
 } from "@/lib/storage";
-import { useStoma3DStore } from "@/store/useStoma3DStore";
+import {
+  LocalWorkspaceConflictError,
+  useStoma3DStore,
+} from "@/store/useStoma3DStore";
 import type { PersistedAppState } from "@/types";
 
 import { PlatformClient, newIdempotencyKey } from "./client";
@@ -45,6 +47,7 @@ import {
 } from "./productSync";
 import { materializeRemoteCaptures } from "./materialize";
 import { requireActiveProductConsent } from "./consent";
+import { CloudError } from "./errors";
 
 const INSTALLATION_ID_KEY = "stoma3d.cloud.installation-id.v1";
 const DEVICE_ID_KEY_PREFIX = "stoma3d.cloud.device-id.v1.";
@@ -80,17 +83,25 @@ export interface CloudSyncResult {
   capturesDownloaded: number;
 }
 
+function assertWorkspaceGeneration(expected: number): void {
+  if (useStoma3DStore.getState().getWorkspaceGeneration() !== expected) {
+    throw new LocalWorkspaceConflictError();
+  }
+}
+
 function accountStorageSuffix(accountId: string): string {
   return syncEntityFingerprint(accountId).slice(0, 32);
 }
 
-async function installationId(): Promise<string> {
+async function installationId(workspaceGeneration: number): Promise<string> {
   const stored = await SecureStore.getItemAsync(INSTALLATION_ID_KEY);
+  assertWorkspaceGeneration(workspaceGeneration);
   if (stored) return stored;
   const value = Crypto.randomUUID();
   await SecureStore.setItemAsync(INSTALLATION_ID_KEY, value, {
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
+  assertWorkspaceGeneration(workspaceGeneration);
   return value;
 }
 
@@ -108,11 +119,14 @@ export async function clearCloudInstallationIdentity(
 async function ensureDevice(
   client: PlatformClient,
   account: MeResponse,
+  workspaceGeneration: number,
 ): Promise<string> {
   const key = `${DEVICE_ID_KEY_PREFIX}${accountStorageSuffix(account.id)}`;
   const stored = await SecureStore.getItemAsync(key);
+  assertWorkspaceGeneration(workspaceGeneration);
   if (stored) return stored;
-  const installId = await installationId();
+  const installId = await installationId(workspaceGeneration);
+  assertWorkspaceGeneration(workspaceGeneration);
   const device = await client.registerDevice(
     {
       installationId: installId,
@@ -121,9 +135,11 @@ async function ensureDevice(
     },
     `device:${installId}`,
   );
+  assertWorkspaceGeneration(workspaceGeneration);
   await SecureStore.setItemAsync(key, device.deviceId, {
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
+  assertWorkspaceGeneration(workspaceGeneration);
   return device.deviceId;
 }
 
@@ -153,8 +169,12 @@ async function stageLocalChanges(options: {
   deviceId: string;
   key: Uint8Array;
   resourceMappings: readonly CloudResourceMapping[];
+  workspaceGeneration: number;
+  assertCurrent: () => void;
 }): Promise<number> {
   const metadata = await cloudMetadata("cloud.");
+  options.assertCurrent();
+  assertWorkspaceGeneration(options.workspaceGeneration);
   const known = Object.entries(metadata)
     .filter(([name]) => name.startsWith("cloud.entity."))
     .flatMap(([name, raw]) => {
@@ -212,6 +232,15 @@ async function stageLocalChanges(options: {
       record: entity.payload,
       ...(cloudRefs ? { cloudRefs: { ...cloudRefs } } : {}),
     };
+    const encryptedPayload = await encryptCloudEntity({
+      accountId: options.accountId,
+      entityType: entity.entityType,
+      entityId: entity.entityId,
+      payload: envelope,
+      key: options.key,
+    });
+    options.assertCurrent();
+    assertWorkspaceGeneration(options.workspaceGeneration);
     const operation: SyncOperationInput = {
       contractVersion: "2.0.0",
       operationId,
@@ -223,13 +252,7 @@ async function stageLocalChanges(options: {
       sequence,
       occurredAt: now,
       operation: "upsert",
-      encryptedPayload: await encryptCloudEntity({
-        accountId: options.accountId,
-        entityType: entity.entityType,
-        entityId: entity.entityId,
-        payload: envelope,
-        key: options.key,
-      }),
+      encryptedPayload,
       tombstone: false,
     };
     operations.push({
@@ -285,24 +308,38 @@ async function stageLocalChanges(options: {
   }
   updates["cloud.sequence"] = String(sequence);
   if (operations.length > 0 || Object.keys(updates).length > 0) {
+    options.assertCurrent();
+    assertWorkspaceGeneration(options.workspaceGeneration);
     await stageCloudOutbox(operations, updates);
+    options.assertCurrent();
+    assertWorkspaceGeneration(options.workspaceGeneration);
   }
   return operations.length;
 }
 
-async function pushPending(client: PlatformClient): Promise<number> {
+async function pushPending(
+  client: PlatformClient,
+  workspaceGeneration: number,
+  assertCurrent: () => void,
+): Promise<number> {
   let pushed = 0;
   for (;;) {
     const records = await readCloudOutbox(100);
+    assertCurrent();
+    assertWorkspaceGeneration(workspaceGeneration);
     if (records.length === 0) break;
     const operations = records.map((record) =>
       syncOperationInputSchema.parse(JSON.parse(record.payload)),
     );
     await markCloudOutboxAttempt(records.map((record) => record.id));
+    assertCurrent();
+    assertWorkspaceGeneration(workspaceGeneration);
     const batchKey = `sync-push:${syncEntityFingerprint(
       operations.map((operation) => operation.operationId),
     ).slice(0, 64)}`;
     const response = await client.pushSync(operations, batchKey);
+    assertCurrent();
+    assertWorkspaceGeneration(workspaceGeneration);
     const acknowledged = new Set(
       response.results.map((result) => result.operationId),
     );
@@ -310,6 +347,8 @@ async function pushPending(client: PlatformClient): Promise<number> {
       throw new Error("The sync service did not acknowledge every operation.");
     }
     await acknowledgeCloudOutbox(records.map((record) => record.id));
+    assertCurrent();
+    assertWorkspaceGeneration(workspaceGeneration);
     pushed += records.length;
   }
   return pushed;
@@ -320,15 +359,17 @@ async function pullRemote(options: {
   accountId: string;
   deviceId: string;
   key: Uint8Array;
+  workspaceGeneration: number;
 }): Promise<number> {
   const metadata = await cloudMetadata("cloud.");
+  assertWorkspaceGeneration(options.workspaceGeneration);
   let cursor = metadata["cloud.cursor"] ?? undefined;
   let pulled = 0;
-  let state = (await loadPersistedState()) ?? useStoma3DStore.getState();
   const metadataUpdates: Record<string, string | null> = {};
 
   for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
     const page = await options.client.pullSync(cursor, 100);
+    assertWorkspaceGeneration(options.workspaceGeneration);
     const changes: DecryptedSyncChange[] = [];
     for (const operation of page.operations) {
       const markerKey = syncEntityMetadataKey(
@@ -398,13 +439,19 @@ async function pullRemote(options: {
       } satisfies EntityMarker);
     }
     if (changes.length > 0) {
-      state = mergeRemoteChanges(state, changes);
-      await useStoma3DStore.getState().applyCloudState(state);
+      await useStoma3DStore
+        .getState()
+        .applyCloudState(
+          (latest) => mergeRemoteChanges(latest, changes),
+          options.workspaceGeneration,
+        );
+      assertWorkspaceGeneration(options.workspaceGeneration);
       pulled += changes.length;
     }
     cursor = page.cursor.cursor;
     metadataUpdates["cloud.cursor"] = cursor;
     await updateCloudMetadata(metadataUpdates);
+    assertWorkspaceGeneration(options.workspaceGeneration);
     if (!page.hasMore) break;
     if (pageNumber === 99) {
       throw new Error(
@@ -419,75 +466,156 @@ async function performCloudSync(
   client = new PlatformClient(),
   options: { confirmAccountRebind?: boolean } = {},
 ): Promise<CloudSyncResult> {
+  // A background JS context may not have opened the protected store yet.
+  // Capture the reset fence before hydration or any remote work can await.
+  const workspaceGeneration = useStoma3DStore
+    .getState()
+    .getWorkspaceGeneration();
+  if (!useStoma3DStore.getState().hydrated) {
+    await useStoma3DStore.getState().hydrate();
+    assertWorkspaceGeneration(workspaceGeneration);
+  }
+  const storageError = useStoma3DStore.getState().storageError;
+  if (storageError) throw new Error(storageError);
   const account = await client.account();
+  assertWorkspaceGeneration(workspaceGeneration);
   if (account.deletionPending) {
     throw new Error(
       "Cloud deletion is pending. New uploads and processing are paused.",
     );
   }
   const productConsent = await requireActiveProductConsent(client);
+  assertWorkspaceGeneration(workspaceGeneration);
   await bindCloudAccount(account.id);
-  if (await cloudAccountRebindPending()) {
+  assertWorkspaceGeneration(workspaceGeneration);
+  const rebindPending = await cloudAccountRebindPending();
+  assertWorkspaceGeneration(workspaceGeneration);
+  if (rebindPending) {
     if (!options.confirmAccountRebind) {
       throw new Error(
         "This device was linked to another account. Review the local records, then tap Sync now if you want to copy this workspace into the newly signed-in account.",
       );
     }
     await confirmCloudAccountRebind();
+    assertWorkspaceGeneration(workspaceGeneration);
   }
-  const deviceId = await ensureDevice(client, account);
+  const deviceId = await ensureDevice(client, account, workspaceGeneration);
+  assertWorkspaceGeneration(workspaceGeneration);
   const keyMaterial = await loadOrCreateCloudKey(account.id);
+  assertWorkspaceGeneration(workspaceGeneration);
   const initialPull = await pullRemote({
     client,
     accountId: account.id,
     deviceId,
     key: keyMaterial.key,
+    workspaceGeneration,
   });
-  const afterPull = await loadPersistedState();
-  const materialized = afterPull
-    ? await materializeRemoteCaptures({ client, state: afterPull })
-    : { state: afterPull, downloaded: 0 };
+  assertWorkspaceGeneration(workspaceGeneration);
+  const afterPull = await useStoma3DStore
+    .getState()
+    .applyCloudState((latest) => latest, workspaceGeneration);
+  assertWorkspaceGeneration(workspaceGeneration);
+  const materialized = await materializeRemoteCaptures({
+    client,
+    state: afterPull,
+    workspaceGeneration,
+  });
+  assertWorkspaceGeneration(workspaceGeneration);
   const persisted = materialized.state;
-  const product = persisted
-    ? await syncProductResources({
-        client,
-        state: persisted,
-        deviceId,
-        consentRecordId: productConsent.consentRecordId,
-      })
-    : {
-        sessionsCreated: 0,
-        captureSetsCreated: 0,
-        capturesUploaded: 0,
-        analysisJobsCreated: 0,
-        lesionsCreated: 0,
-        matchProposalsCreated: 0,
-        matchDecisionsRecorded: 0,
-        comparisonJobsCreated: 0,
-      };
+  const productFingerprints = (state: PersistedAppState) => {
+    const captures = new Map(
+      state.captures.map((record) => [record.id, record]),
+    );
+    return new Map(
+      buildSyncEntities(state)
+        .filter((entity) => entity.entityType !== "report")
+        .map((entity) => [
+          syncEntityMetadataKey(entity.entityType, entity.entityId),
+          syncEntityFingerprint(
+            entity.entityType === "capture_view"
+              ? captures.get(entity.entityId)
+              : entity.payload,
+          ),
+        ]),
+    );
+  };
+  const planned = productFingerprints(persisted);
+  const assertCurrent = () => {
+    assertWorkspaceGeneration(workspaceGeneration);
+    const currentState = useStoma3DStore.getState();
+    if (currentState.storageError) throw new Error(currentState.storageError);
+    const current = productFingerprints(currentState);
+    for (const [key, fingerprint] of planned) {
+      if (current.get(key) !== fingerprint) {
+        throw new CloudError({
+          code: "conflict",
+          message:
+            "A scan changed during sync. Retry sync to use the latest photos.",
+          retryable: true,
+        });
+      }
+    }
+  };
+  const product = await syncProductResources({
+    client,
+    state: persisted,
+    deviceId,
+    consentRecordId: productConsent.consentRecordId,
+    assertCurrent,
+  });
+  assertWorkspaceGeneration(workspaceGeneration);
   const resourceMappings = await readCloudResourceMappings();
-  const staged = persisted
-    ? await stageLocalChanges({
-        state: persisted,
-        accountId: account.id,
-        deviceId,
-        key: keyMaterial.key,
-        resourceMappings,
-      })
-    : 0;
-  const pushed = await pushPending(client);
+  assertWorkspaceGeneration(workspaceGeneration);
+  const latest = await useStoma3DStore
+    .getState()
+    .applyCloudState((state) => state, workspaceGeneration);
+  assertWorkspaceGeneration(workspaceGeneration);
+  const stagedFingerprint = syncEntityFingerprint(buildSyncEntities(latest));
+  const assertStagedCurrent = () => {
+    assertWorkspaceGeneration(workspaceGeneration);
+    const state = useStoma3DStore.getState();
+    if (state.storageError) throw new Error(state.storageError);
+    if (syncEntityFingerprint(buildSyncEntities(state)) !== stagedFingerprint) {
+      throw new CloudError({
+        code: "conflict",
+        message:
+          "A scan changed during sync. Retry sync to use the latest photos.",
+        retryable: true,
+      });
+    }
+  };
+  const staged = await stageLocalChanges({
+    state: latest,
+    accountId: account.id,
+    deviceId,
+    key: keyMaterial.key,
+    resourceMappings,
+    workspaceGeneration,
+    assertCurrent: assertStagedCurrent,
+  });
+  assertWorkspaceGeneration(workspaceGeneration);
+  const pushed = await pushPending(
+    client,
+    workspaceGeneration,
+    assertStagedCurrent,
+  );
+  assertWorkspaceGeneration(workspaceGeneration);
   const finalPull = await pullRemote({
     client,
     accountId: account.id,
     deviceId,
     key: keyMaterial.key,
+    workspaceGeneration,
   });
+  assertWorkspaceGeneration(workspaceGeneration);
   const pending = (await readCloudOutbox(100)).length;
+  assertWorkspaceGeneration(workspaceGeneration);
   const completedAt = new Date().toISOString();
   await updateCloudMetadata({
     "cloud.last_sync_at": completedAt,
     "cloud.last_sync_error": null,
   });
+  assertWorkspaceGeneration(workspaceGeneration);
   return {
     staged,
     pushed,

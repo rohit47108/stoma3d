@@ -18,6 +18,7 @@ import { captureDraftSchema, type CaptureDraft } from "@/lib/captureDrafts";
 import { cancelAllStoma3DReminders } from "@/lib/notifications";
 import { pinsAfterConfirmedComparison } from "@/lib/observationPins";
 import { comparisonsWithoutCaptureIds } from "@/lib/scanLogic";
+import { createLocalMutationQueue } from "@/lib/localMutationQueue";
 import {
   deleteAllLocalDataAndRotateKeys,
   loadPersistedState,
@@ -48,13 +49,13 @@ interface Stoma3DState extends PersistedAppState {
   hydrated: boolean;
   storageError: string | null;
   hydrate: () => Promise<void>;
-  finishConsent: (profile: IntakeProfile) => void;
+  finishConsent: (profile: IntakeProfile) => Promise<void>;
   finishConsentAndStartSession: (
     profile: IntakeProfile,
     protocol: CaptureProtocol,
   ) => Promise<string>;
-  startFreshSession: (protocol?: CaptureProtocol) => string;
-  setActiveSession: (sessionId: string) => void;
+  startFreshSession: (protocol?: CaptureProtocol) => Promise<string>;
+  setActiveSession: (sessionId: string) => Promise<void>;
   addCapture: (
     capture: CaptureRecord,
     analysis: AnalysisResult,
@@ -70,11 +71,17 @@ interface Stoma3DState extends PersistedAppState {
     analysis: AnalysisResult,
   ) => Promise<void>;
   discardCapture: (captureId: string) => Promise<void>;
-  confirmObservationPin: (captureId: string) => void;
+  confirmObservationPin: (captureId: string) => Promise<void>;
   addComparison: (comparison: ComparisonResult) => Promise<void>;
   addReport: (report: ReportRecord) => Promise<void>;
-  updateSettings: (settings: Partial<AccessibilitySettings>) => void;
-  applyCloudState: (state: PersistedAppState) => Promise<void>;
+  updateSettings: (settings: Partial<AccessibilitySettings>) => Promise<void>;
+  /** Capture before cloud work begins; a local reset cancels that work. */
+  getWorkspaceGeneration: () => number;
+  /** Derive and commit against the latest state inside the local mutation queue. */
+  applyCloudState: (
+    update: (latest: PersistedAppState) => PersistedAppState,
+    expectedWorkspaceGeneration: number,
+  ) => Promise<PersistedAppState>;
   deleteEverything: () => Promise<void>;
 }
 
@@ -131,15 +138,36 @@ function protectedUris(state: Stoma3DState): Set<string> {
   ]);
 }
 
-function persist(
-  state: Stoma3DState,
-  onError: (message: string) => void,
-): void {
-  void queuePersistedState(persistedSnapshot(state)).catch(() => {
-    onError(
-      "Stoma3D could not save the latest local change. Retry before continuing.",
-    );
-  });
+function reportSessionsAffectedByCaptures(
+  state: PersistedAppState,
+  captureIds: Iterable<string>,
+): Set<string> {
+  const changedIds = new Set(captureIds);
+  const sessionsByCaptureId = new Map(
+    state.captures.map((capture) => [capture.id, capture.sessionId]),
+  );
+  const affected = new Set<string>();
+  const includeCaptureSession = (captureId: string) => {
+    const sessionId = sessionsByCaptureId.get(captureId);
+    if (sessionId) affected.add(sessionId);
+  };
+  changedIds.forEach(includeCaptureSession);
+  // Reports include comparisons ending in their session, even when the
+  // baseline belongs to an earlier scan. Read dependencies before removing them.
+  for (const comparison of state.comparisons) {
+    if (
+      changedIds.has(comparison.baselineCaptureId) ||
+      changedIds.has(comparison.currentCaptureId)
+    )
+      includeCaptureSession(comparison.currentCaptureId);
+  }
+  // A linked pin also appears in every session containing one of its captures.
+  for (const pin of state.pins) {
+    if (pin.captureIds.some((id) => changedIds.has(id))) {
+      pin.captureIds.forEach(includeCaptureSession);
+    }
+  }
+  return affected;
 }
 
 function snapshotProfile(profile: IntakeProfile | null): IntakeProfile | null {
@@ -298,63 +326,105 @@ function assertPersistedReferences(state: PersistedAppState): void {
   }
 }
 
+const enqueueLocalMutation = createLocalMutationQueue();
+let workspaceGeneration = 0;
+let needsHydration = false;
+
+export class LocalWorkspaceConflictError extends Error {
+  constructor() {
+    super(
+      "The local workspace changed while cloud work was in progress. Retry sync.",
+    );
+    this.name = "LocalWorkspaceConflictError";
+  }
+}
+
+/** A write may have committed; preserve its ciphertext until durable reload. */
+export class LocalWorkspaceReloadError extends Error {
+  constructor(
+    message = "Synced changes were saved, but the protected workspace could not be reloaded. Reload the protected workspace before continuing.",
+  ) {
+    super(message);
+    this.name = "LocalWorkspaceReloadError";
+  }
+}
+
+function serializedMutation<Args extends unknown[], Result>(
+  mutation: (...args: Args) => Promise<Result>,
+  { allowRecovery = false }: { allowRecovery?: boolean } = {},
+): (...args: Args) => Promise<Result> {
+  return (...args) =>
+    enqueueLocalMutation(() => {
+      if (needsHydration && !allowRecovery)
+        throw new LocalWorkspaceReloadError(
+          "Reload the protected workspace before saving more changes.",
+        );
+      return mutation(...args);
+    });
+}
+
 export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
   ...initialPersistedState(),
   captureDrafts: [],
   hydrated: false,
   storageError: null,
 
-  hydrate: async () => {
-    set({ hydrated: false, storageError: null });
-    try {
-      const loaded = await loadPersistedState();
-      const persisted = loaded ? withoutDemoData(loaded) : null;
-      const captureDrafts = await loadCaptureDrafts();
-      const sessionIds = new Set(
-        persisted?.sessions.map((session) => session.id) ?? [],
-      );
-      const validDrafts = captureDrafts.filter((draft) =>
-        sessionIds.has(draft.sessionId),
-      );
-      for (const draft of captureDrafts) {
-        if (!sessionIds.has(draft.sessionId)) {
-          await deleteStoredCaptureDraft(draft.id);
-          await removeProtectedFile(draft.encryptedUri);
+  hydrate: serializedMutation(
+    async () => {
+      set({ hydrated: false, storageError: null });
+      try {
+        const loaded = await loadPersistedState();
+        const persisted = loaded ? withoutDemoData(loaded) : null;
+        const captureDrafts = await loadCaptureDrafts();
+        const sessionIds = new Set(
+          persisted?.sessions.map((session) => session.id) ?? [],
+        );
+        const validDrafts = captureDrafts.filter((draft) =>
+          sessionIds.has(draft.sessionId),
+        );
+        for (const draft of captureDrafts) {
+          if (!sessionIds.has(draft.sessionId)) {
+            await deleteStoredCaptureDraft(draft.id);
+            await removeProtectedFile(draft.encryptedUri);
+          }
         }
-      }
-      if (persisted) {
-        assertPersistedReferences(persisted);
-        try {
-          await removeUnreferencedProtectedFiles([
-            ...persisted.captures.map((capture) => capture.encryptedUri),
-            ...persisted.reports.map((report) => report.encryptedUri),
-            ...validDrafts.map((draft) => draft.encryptedUri),
-          ]);
-        } catch {
-          console.warn("[STOMA3D_ORPHAN_CLEANUP_FAILED]");
+        if (persisted) {
+          assertPersistedReferences(persisted);
+          try {
+            await removeUnreferencedProtectedFiles([
+              ...persisted.captures.map((capture) => capture.encryptedUri),
+              ...persisted.reports.map((report) => report.encryptedUri),
+              ...validDrafts.map((draft) => draft.encryptedUri),
+            ]);
+          } catch {
+            console.warn("[STOMA3D_ORPHAN_CLEANUP_FAILED]");
+          }
         }
+        set({
+          ...(persisted ?? initialPersistedState()),
+          pins: normalizePersistedPins(persisted?.pins ?? []),
+          captureDrafts: validDrafts,
+          hydrated: true,
+          storageError: null,
+        });
+        if (loaded && persisted !== loaded) {
+          await queuePersistedState(persistedSnapshot(get()));
+        }
+        needsHydration = false;
+      } catch (error) {
+        needsHydration = true;
+        console.warn("[STOMA3D_STORAGE_OPEN_FAILED]");
+        set({
+          hydrated: true,
+          storageError:
+            "The protected local workspace could not be opened or validated. Stoma3D has not replaced it with an empty workspace.",
+        });
       }
-      set({
-        ...(persisted ?? initialPersistedState()),
-        pins: normalizePersistedPins(persisted?.pins ?? []),
-        captureDrafts: validDrafts,
-        hydrated: true,
-        storageError: null,
-      });
-      if (loaded && persisted !== loaded) {
-        await queuePersistedState(persistedSnapshot(get()));
-      }
-    } catch (error) {
-      console.warn("[STOMA3D_STORAGE_OPEN_FAILED]");
-      set({
-        hydrated: true,
-        storageError:
-          "The protected local workspace could not be opened or validated. Stoma3D has not replaced it with an empty workspace.",
-      });
-    }
-  },
+    },
+    { allowRecovery: true },
+  ),
 
-  saveCaptureDraft: async (value) => {
+  saveCaptureDraft: serializedMutation(async (value) => {
     const draft = captureDraftSchema.parse(value);
     if (
       !get().consentedAt ||
@@ -381,9 +451,9 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
       if (!retained.has(item.encryptedUri))
         await removeProtectedFile(item.encryptedUri);
     }
-  },
+  }),
 
-  removeCaptureDraft: async (id) => {
+  removeCaptureDraft: serializedMutation(async (id) => {
     const draft = get().captureDrafts.find((item) => item.id === id);
     const captureDrafts = await deleteStoredCaptureDraft(id);
     set({ captureDrafts });
@@ -395,79 +465,114 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
     ) {
       await removeProtectedFile(draft.encryptedUri);
     }
-  },
+  }),
 
-  finishConsent: (profile) => {
+  finishConsent: serializedMutation(async (profile) => {
+    const stateBeforeCommit = get();
     set({
       profile,
       consentedAt: new Date().toISOString(),
       storageError: null,
     });
-    persist(get(), (message) => set({ storageError: message }));
-  },
-
-  finishConsentAndStartSession: async (profile, protocol) => {
-    const stateBeforeCommit = get();
-    const consentedAt = new Date().toISOString();
-    const id = Crypto.randomUUID();
-    const session: ScanSession = {
-      id,
-      createdAt: consentedAt,
-      demo: false,
-      label: "Structured mouth scan",
-      protocol,
-      intakeProfile: snapshotProfile(profile),
-      consentedAt,
-    };
-    set((state) => ({
-      profile,
-      consentedAt,
-      sessions: [...state.sessions, session],
-      activeSessionId: id,
-      storageError: null,
-    }));
     try {
       await queuePersistedState(persistedSnapshot(get()));
     } catch {
       set(stateBeforeCommit);
       throw new Error(
-        "Consent and intake could not be saved in the protected workspace.",
+        "Consent could not be saved. The previous intake is unchanged.",
       );
     }
-    return id;
-  },
+  }),
 
-  startFreshSession: (protocol = "standard_eight_region") => {
-    const id = Crypto.randomUUID();
-    const session: ScanSession = {
-      id,
-      createdAt: new Date().toISOString(),
-      demo: false,
-      label: "New structured scan",
-      protocol,
-      intakeProfile: snapshotProfile(get().profile),
-      consentedAt: get().consentedAt,
-    };
-    set((state) => ({
-      sessions: [...state.sessions, session],
-      activeSessionId: id,
-      storageError: null,
-    }));
-    persist(get(), (message) => set({ storageError: message }));
-    return id;
-  },
+  finishConsentAndStartSession: serializedMutation(
+    async (profile, protocol) => {
+      const stateBeforeCommit = get();
+      const consentedAt = new Date().toISOString();
+      const id = Crypto.randomUUID();
+      const session: ScanSession = {
+        id,
+        createdAt: consentedAt,
+        demo: false,
+        label: "Structured mouth scan",
+        protocol,
+        intakeProfile: snapshotProfile(profile),
+        consentedAt,
+      };
+      set((state) => ({
+        profile,
+        consentedAt,
+        sessions: [...state.sessions, session],
+        activeSessionId: id,
+        storageError: null,
+      }));
+      try {
+        await queuePersistedState(persistedSnapshot(get()));
+      } catch {
+        set(stateBeforeCommit);
+        throw new Error(
+          "Consent and intake could not be saved in the protected workspace.",
+        );
+      }
+      return id;
+    },
+  ),
 
-  setActiveSession: (sessionId) => {
-    if (!get().sessions.some((session) => session.id === sessionId)) return;
+  startFreshSession: serializedMutation(
+    async (protocol: CaptureProtocol = "standard_eight_region") => {
+      const stateBeforeCommit = get();
+      if (!stateBeforeCommit.consentedAt) {
+        throw new Error("Review consent before starting a new scan.");
+      }
+      const id = Crypto.randomUUID();
+      const session: ScanSession = {
+        id,
+        createdAt: new Date().toISOString(),
+        demo: false,
+        label: "New structured scan",
+        protocol,
+        intakeProfile: snapshotProfile(get().profile),
+        consentedAt: get().consentedAt,
+      };
+      set((state) => ({
+        sessions: [...state.sessions, session],
+        activeSessionId: id,
+        storageError: null,
+      }));
+      try {
+        await queuePersistedState(persistedSnapshot(get()));
+      } catch {
+        set(stateBeforeCommit);
+        throw new Error(
+          "The new scan could not be saved. The previous scan is unchanged.",
+        );
+      }
+      return id;
+    },
+  ),
+
+  setActiveSession: serializedMutation(async (sessionId) => {
+    const stateBeforeCommit = get();
+    if (
+      !stateBeforeCommit.sessions.some((session) => session.id === sessionId)
+    ) {
+      throw new Error("The selected scan is no longer available.");
+    }
     set({ activeSessionId: sessionId, storageError: null });
-    persist(get(), (message) => set({ storageError: message }));
-  },
+    try {
+      await queuePersistedState(persistedSnapshot(get()));
+    } catch {
+      set(stateBeforeCommit);
+      throw new Error(
+        "The selected scan could not be saved. The previous scan is unchanged.",
+      );
+    }
+  }),
 
   addCapture: async (capture, analysis) => {
     await get().addCaptures([{ capture, analysis }]);
   },
 
-  addCaptures: async (entries) => {
+  addCaptures: serializedMutation(async (entries) => {
     if (entries.length === 0 || entries.length > 12) {
       throw new Error("A capture save must contain between one and 12 views.");
     }
@@ -560,9 +665,13 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         `${item.sessionId}\u0000${item.region}\u0000${item.angle}`,
       ),
     );
-    const affectedSessionIds = new Set(
-      entries.map(({ capture }) => capture.sessionId),
-    );
+    const affectedSessionIds = new Set([
+      ...entries.map(({ capture }) => capture.sessionId),
+      ...reportSessionsAffectedByCaptures(
+        stateBeforeCommit,
+        supersededCaptures.map((capture) => capture.id),
+      ),
+    ]);
     const invalidatedReports = stateBeforeCommit.reports.filter((report) =>
       affectedSessionIds.has(report.sessionId),
     );
@@ -639,9 +748,9 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
     if (cleanupResults.some((result) => result.status === "rejected")) {
       console.warn("[STOMA3D_SUPERSEDED_FILE_CLEANUP_FAILED]");
     }
-  },
+  }),
 
-  updateCaptureAnalysis: async (captureId, analysis) => {
+  updateCaptureAnalysis: serializedMutation(async (captureId, analysis) => {
     const stateBeforeCommit = get();
     const capture = stateBeforeCommit.captures.find(
       (item) => item.id === captureId,
@@ -670,9 +779,12 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
     const observationChanged = maskChanged || descriptorsChanged;
     const analysisChanged =
       JSON.stringify(previousAnalysis) !== JSON.stringify(analysis);
+    const affectedSessionIds = analysisChanged
+      ? reportSessionsAffectedByCaptures(stateBeforeCommit, [captureId])
+      : new Set<string>();
     const invalidatedReports = analysisChanged
-      ? stateBeforeCommit.reports.filter(
-          (report) => report.sessionId === capture.sessionId,
+      ? stateBeforeCommit.reports.filter((report) =>
+          affectedSessionIds.has(report.sessionId),
         )
       : [];
     const pins = observationChanged
@@ -725,7 +837,7 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         : state.comparisons,
       reports: analysisChanged
         ? state.reports.filter(
-            (report) => report.sessionId !== capture.sessionId,
+            (report) => !affectedSessionIds.has(report.sessionId),
           )
         : state.reports,
       storageError: null,
@@ -747,16 +859,20 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
     if (cleanup.some((result) => result.status === "rejected")) {
       console.warn("[STOMA3D_STALE_REPORT_CLEANUP_FAILED]");
     }
-  },
+  }),
 
-  discardCapture: async (captureId) => {
+  discardCapture: serializedMutation(async (captureId) => {
     const stateBeforeCommit = get();
     const capture = stateBeforeCommit.captures.find(
       (item) => item.id === captureId,
     );
     if (!capture) return;
-    const removedReports = stateBeforeCommit.reports.filter(
-      (report) => report.sessionId === capture.sessionId,
+    const affectedSessionIds = reportSessionsAffectedByCaptures(
+      stateBeforeCommit,
+      [captureId],
+    );
+    const removedReports = stateBeforeCommit.reports.filter((report) =>
+      affectedSessionIds.has(report.sessionId),
     );
     set((state) => ({
       captures: state.captures.filter((item) => item.id !== captureId),
@@ -766,7 +882,7 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
       comparisons: comparisonsWithoutCaptureIds(state.comparisons, [captureId]),
       pins: state.pins.filter((pin) => !pin.captureIds.includes(captureId)),
       reports: state.reports.filter(
-        (report) => report.sessionId !== capture.sessionId,
+        (report) => !affectedSessionIds.has(report.sessionId),
       ),
       storageError: null,
     }));
@@ -778,12 +894,16 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         "The rejected observation could not be removed safely. Retry local deletion from Settings.",
       );
     }
-    const cleanup = await Promise.allSettled([
-      removeProtectedFile(capture.encryptedUri),
-      ...removedReports.map((report) =>
-        removeProtectedFile(report.encryptedUri),
-      ),
-    ]);
+    const retainedUris = protectedUris(get());
+    const obsoleteUris = new Set(
+      [
+        capture.encryptedUri,
+        ...removedReports.map((report) => report.encryptedUri),
+      ].filter((uri): uri is string => !!uri && !retainedUris.has(uri)),
+    );
+    const cleanup = await Promise.allSettled(
+      [...obsoleteUris].map((uri) => removeProtectedFile(uri)),
+    );
     if (cleanup.some((result) => result.status === "rejected")) {
       set({
         storageError:
@@ -793,24 +913,54 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         "The observation record was removed, but protected-file cleanup did not finish.",
       );
     }
-  },
+  }),
 
-  confirmObservationPin: (captureId) => {
-    const state = get();
-    if (state.pins.some((pin) => pin.captureIds.includes(captureId))) {
+  confirmObservationPin: serializedMutation(async (captureId) => {
+    const stateBeforeCommit = get();
+    if (
+      stateBeforeCommit.pins.some((pin) => pin.captureIds.includes(captureId))
+    ) {
       return;
     }
-    const capture = state.captures.find((item) => item.id === captureId);
-    const analysis = state.analyses[captureId];
+    const capture = stateBeforeCommit.captures.find(
+      (item) => item.id === captureId,
+    );
+    const analysis = stateBeforeCommit.analyses[captureId];
     if (!capture || !analysis?.candidateMask) return;
+    const affectedSessionIds = reportSessionsAffectedByCaptures(
+      stateBeforeCommit,
+      [captureId],
+    );
+    const invalidatedReports = stateBeforeCommit.reports.filter((report) =>
+      affectedSessionIds.has(report.sessionId),
+    );
     set({
-      pins: pinForAnalysis(state.pins, capture, analysis),
+      pins: pinForAnalysis(stateBeforeCommit.pins, capture, analysis),
+      reports: stateBeforeCommit.reports.filter(
+        (report) => !affectedSessionIds.has(report.sessionId),
+      ),
       storageError: null,
     });
-    persist(get(), (message) => set({ storageError: message }));
-  },
+    try {
+      await queuePersistedState(persistedSnapshot(get()));
+    } catch {
+      set(stateBeforeCommit);
+      throw new Error(
+        "The map location could not be saved. The previous history is unchanged.",
+      );
+    }
+    const retainedUris = protectedUris(get());
+    const cleanup = await Promise.allSettled(
+      invalidatedReports
+        .filter((report) => !retainedUris.has(report.encryptedUri))
+        .map((report) => removeProtectedFile(report.encryptedUri)),
+    );
+    if (cleanup.some((result) => result.status === "rejected")) {
+      console.warn("[STOMA3D_STALE_REPORT_CLEANUP_FAILED]");
+    }
+  }),
 
-  addComparison: async (comparison) => {
+  addComparison: serializedMutation(async (comparison) => {
     const stateBeforeCommit = get();
     const baseline = stateBeforeCommit.captures.find(
       (capture) => capture.id === comparison.baselineCaptureId,
@@ -832,6 +982,13 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         "Only a user-confirmed, chronological comparison of two saved live observations can be stored.",
       );
     }
+    const affectedSessionIds = reportSessionsAffectedByCaptures(
+      stateBeforeCommit,
+      [baseline.id, current.id],
+    );
+    const invalidatedReports = stateBeforeCommit.reports.filter((report) =>
+      affectedSessionIds.has(report.sessionId),
+    );
     set((state) => ({
       comparisons: [
         ...state.comparisons.filter(
@@ -846,6 +1003,9 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         state.captures,
         comparison,
       ),
+      reports: state.reports.filter(
+        (report) => !affectedSessionIds.has(report.sessionId),
+      ),
       storageError: null,
     }));
     try {
@@ -856,9 +1016,18 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
         "The comparison could not be saved. Existing history is unchanged.",
       );
     }
-  },
+    const retainedUris = protectedUris(get());
+    const cleanup = await Promise.allSettled(
+      invalidatedReports
+        .filter((report) => !retainedUris.has(report.encryptedUri))
+        .map((report) => removeProtectedFile(report.encryptedUri)),
+    );
+    if (cleanup.some((result) => result.status === "rejected")) {
+      console.warn("[STOMA3D_STALE_REPORT_CLEANUP_FAILED]");
+    }
+  }),
 
-  addReport: async (report) => {
+  addReport: serializedMutation(async (report) => {
     const stateBeforeCommit = get();
     const replaced = stateBeforeCommit.reports.filter(
       (item) => item.sessionId === report.sessionId,
@@ -885,80 +1054,125 @@ export const useStoma3DStore = create<Stoma3DState>((set, get) => ({
     if (cleanup.some((result) => result.status === "rejected")) {
       console.warn("[STOMA3D_REPLACED_REPORT_CLEANUP_FAILED]");
     }
-  },
+  }),
 
-  updateSettings: (settings) => {
+  updateSettings: serializedMutation(async (settings) => {
+    const stateBeforeCommit = get();
     set((state) => ({
       settings: { ...state.settings, ...settings },
       storageError: null,
     }));
-    persist(get(), (message) => set({ storageError: message }));
-  },
-
-  applyCloudState: async (state) => {
-    const stateBeforeCommit = get();
-    assertPersistedReferences(state);
-    const retainedUris = new Set([
-      ...state.captures.flatMap((capture) =>
-        capture.encryptedUri ? [capture.encryptedUri] : [],
-      ),
-      ...state.reports.map((report) => report.encryptedUri),
-      ...stateBeforeCommit.captureDrafts.map((draft) => draft.encryptedUri),
-    ]);
-    const removedUris = [
-      ...stateBeforeCommit.captures.flatMap((capture) =>
-        capture.encryptedUri && !retainedUris.has(capture.encryptedUri)
-          ? [capture.encryptedUri]
-          : [],
-      ),
-      ...stateBeforeCommit.reports.flatMap((report) =>
-        !retainedUris.has(report.encryptedUri) ? [report.encryptedUri] : [],
-      ),
-    ];
-    set({ ...state, hydrated: true, storageError: null });
     try {
       await queuePersistedState(persistedSnapshot(get()));
     } catch {
       set(stateBeforeCommit);
       throw new Error(
-        "Synced changes could not be saved in the protected workspace.",
+        "The local settings could not be saved. The previous settings are unchanged.",
       );
     }
-    const cleanup = await Promise.allSettled(
-      [...new Set(removedUris)].map((uri) => removeProtectedFile(uri)),
-    );
-    if (cleanup.some((result) => result.status === "rejected")) {
-      console.warn("[STOMA3D_SYNCED_FILE_CLEANUP_FAILED]");
-    }
-  },
+  }),
 
-  deleteEverything: async () => {
-    let reminderCleanupFailed = false;
-    try {
-      await cancelAllStoma3DReminders();
-    } catch {
-      reminderCleanupFailed = true;
-    }
-    await deleteAllLocalDataAndRotateKeys();
-    set({
-      ...initialPersistedState(),
-      captureDrafts: [],
-      hydrated: true,
-      storageError: null,
-    });
-    try {
-      await queuePersistedState(persistedSnapshot(get()));
-    } catch {
-      throw new Error(
-        "Local data was removed, but the empty protected state could not be initialized.",
+  getWorkspaceGeneration: () => workspaceGeneration,
+
+  applyCloudState: serializedMutation(
+    async (update, expectedWorkspaceGeneration) => {
+      // Check inside the FIFO turn, before evaluating a cloud reducer or touching
+      // protected files. Even a partially failed reset invalidates old work.
+      if (expectedWorkspaceGeneration !== workspaceGeneration)
+        throw new LocalWorkspaceConflictError();
+      const stateBeforeCommit = get();
+      const state = update(persistedSnapshot(stateBeforeCommit));
+      assertPersistedReferences(state);
+      try {
+        // Storage may suppress replayed identifiers using durable tombstones.
+        // Do not publish the requested state as though every row was accepted.
+        await queuePersistedState(state);
+      } catch {
+        throw new Error(
+          "Synced changes could not be saved in the protected workspace.",
+        );
+      }
+      let committed: PersistedAppState;
+      try {
+        const reloaded = await loadPersistedState();
+        if (!reloaded) throw new Error("The committed workspace is missing.");
+        assertPersistedReferences(reloaded);
+        committed = reloaded;
+      } catch {
+        // The write succeeded. Neither rollback nor file deletion is safe until
+        // actual durable references are known. The root error card can reload.
+        needsHydration = true;
+        const error = new LocalWorkspaceReloadError();
+        set({ hydrated: true, storageError: error.message });
+        throw error;
+      }
+      set({ ...committed, hydrated: true, storageError: null });
+      const retainedUris = protectedUris(get());
+      const removedUris = [stateBeforeCommit, state].flatMap((snapshot) => [
+        ...snapshot.captures.flatMap((capture) =>
+          capture.encryptedUri && !retainedUris.has(capture.encryptedUri)
+            ? [capture.encryptedUri]
+            : [],
+        ),
+        ...snapshot.reports.flatMap((report) =>
+          !retainedUris.has(report.encryptedUri) ? [report.encryptedUri] : [],
+        ),
+      ]);
+      const cleanup = await Promise.allSettled(
+        [...new Set(removedUris)].map((uri) => removeProtectedFile(uri)),
       );
-    }
-    if (reminderCleanupFailed) {
-      throw new Error(
-        "Local data was removed, but the device could not confirm that scheduled Stoma3D reminders were canceled. Review notification settings on this device.",
-      );
-    }
-  },
+      if (cleanup.some((result) => result.status === "rejected")) {
+        console.warn("[STOMA3D_SYNCED_FILE_CLEANUP_FAILED]");
+      }
+      return committed;
+    },
+  ),
+
+  deleteEverything: serializedMutation(
+    async () => {
+      workspaceGeneration += 1;
+      let reminderCleanupFailed = false;
+      try {
+        await cancelAllStoma3DReminders();
+      } catch {
+        reminderCleanupFailed = true;
+      }
+      try {
+        await deleteAllLocalDataAndRotateKeys();
+      } catch (error) {
+        needsHydration = true;
+        set({
+          hydrated: true,
+          storageError:
+            "Local data could not be fully cleared. Reload the protected workspace before continuing.",
+        });
+        throw error;
+      }
+      set({
+        ...initialPersistedState(),
+        captureDrafts: [],
+        hydrated: true,
+        storageError: null,
+      });
+      try {
+        await queuePersistedState(persistedSnapshot(get()));
+        needsHydration = false;
+      } catch {
+        needsHydration = true;
+        const error = new Error(
+          "Local data was removed, but the empty protected state could not be initialized.",
+        );
+        set({ hydrated: true, storageError: error.message });
+        throw error;
+      }
+      if (reminderCleanupFailed) {
+        throw new Error(
+          "Local data was removed, but the device could not confirm that scheduled Stoma3D reminders were canceled. Review notification settings on this device.",
+        );
+      }
+    },
+    { allowRecovery: true },
+  ),
 }));
 
 export function regionLabelForId(region: MouthRegion): string {

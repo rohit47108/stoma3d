@@ -80,7 +80,7 @@ function parseMapping(value: string | null): CloudResourceMapping | null {
   }
 }
 
-async function saveMapping(mapping: CloudResourceMapping): Promise<void> {
+async function persistMapping(mapping: CloudResourceMapping): Promise<void> {
   await updateCloudMetadata({
     [cloudMappingKey(mapping.kind, mapping.localId)]: JSON.stringify(mapping),
   });
@@ -166,6 +166,7 @@ async function remoteObservationForCapture(options: {
   mappings: Map<string, CloudResourceMapping>;
   jobs: Map<string, Promise<JobResponse>>;
   runs: Map<string, Promise<AnalysisRun>>;
+  assertCurrent: () => void;
 }): Promise<AnalysisRun["observations"][number] | null> {
   const jobMapping = options.mappings.get(
     `analysis_job:${options.localCaptureId}`,
@@ -176,28 +177,35 @@ async function remoteObservationForCapture(options: {
   if (!jobMapping || !captureMapping) return null;
   let jobPromise = options.jobs.get(jobMapping.remoteId);
   if (!jobPromise) {
+    options.assertCurrent();
     jobPromise = options.client.job(jobMapping.remoteId);
     options.jobs.set(jobMapping.remoteId, jobPromise);
   }
   const job = await jobPromise;
+  options.assertCurrent();
   if (job.status !== "succeeded" || job.outcome !== "complete") return null;
   for (const outputId of job.outputRefs) {
     let runPromise = options.runs.get(outputId);
     if (!runPromise) {
+      options.assertCurrent();
       runPromise = options.client.analysisRun(outputId);
       options.runs.set(outputId, runPromise);
     }
+    let run: AnalysisRun;
     try {
-      const run = await runPromise;
-      const observation = run.observations.find(
-        (value) =>
-          value.captureViewId === captureMapping.remoteId &&
-          value.region === options.region,
-      );
-      if (observation) return observation;
+      run = await runPromise;
     } catch {
       // Analysis jobs may also name non-analysis artifacts in outputRefs.
+      options.assertCurrent();
+      continue;
     }
+    options.assertCurrent();
+    const observation = run.observations.find(
+      (value) =>
+        value.captureViewId === captureMapping.remoteId &&
+        value.region === options.region,
+    );
+    if (observation) return observation;
   }
   return null;
 }
@@ -217,13 +225,24 @@ export async function syncProductResources(options: {
   state: PersistedAppState;
   deviceId: string;
   consentRecordId: string;
+  assertCurrent: () => void;
 }): Promise<ProductSyncResult> {
+  const checked = async <Value>(work: () => Promise<Value>): Promise<Value> => {
+    options.assertCurrent();
+    const value = await work();
+    options.assertCurrent();
+    return value;
+  };
+  const saveMapping = (mapping: CloudResourceMapping) =>
+    checked(() => persistMapping(mapping));
+  options.assertCurrent();
   const mappings = new Map(
     (await readCloudResourceMappings()).map((value) => [
       `${value.kind}:${value.localId}`,
       value,
     ]),
   );
+  options.assertCurrent();
   const result: ProductSyncResult = {
     sessionsCreated: 0,
     captureSetsCreated: 0,
@@ -238,13 +257,15 @@ export async function syncProductResources(options: {
   for (const session of options.state.sessions) {
     const key = `scan_session:${session.id}`;
     if (mappings.has(key)) continue;
-    const remote = await options.client.createScanSession(
-      {
-        protocol: retainedAssetProtocol(session.protocol),
-        deviceId: options.deviceId,
-        consentRecordId: options.consentRecordId,
-      },
-      deterministicKey("scan-session", session.id),
+    const remote = await checked(() =>
+      options.client.createScanSession(
+        {
+          protocol: retainedAssetProtocol(session.protocol),
+          deviceId: options.deviceId,
+          consentRecordId: options.consentRecordId,
+        },
+        deterministicKey("scan-session", session.id),
+      ),
     );
     const mapping: CloudResourceMapping = {
       kind: "scan_session",
@@ -273,13 +294,15 @@ export async function syncProductResources(options: {
     if (!session || !remoteSession) continue;
     const key = `capture_set:${localSetId}`;
     if (!mappings.has(key)) {
-      const remote = await options.client.createCaptureSet(
-        remoteSession.remoteId,
-        {
-          region: first.region,
-          protocol: retainedAssetProtocol(session.protocol),
-        },
-        deterministicKey("capture-set", localSetId),
+      const remote = await checked(() =>
+        options.client.createCaptureSet(
+          remoteSession.remoteId,
+          {
+            region: first.region,
+            protocol: retainedAssetProtocol(session.protocol),
+          },
+          deterministicKey("capture-set", localSetId),
+        ),
       );
       const mapping: CloudResourceMapping = {
         kind: "capture_set",
@@ -303,35 +326,39 @@ export async function syncProductResources(options: {
       let mapping = mappings.get(captureKey);
       if (mapping?.uploaded) continue;
       if (!capture.encryptedUri && !mapping) continue;
+      options.assertCurrent();
       const asset = await prepareCaptureAsset(capture);
       try {
+        options.assertCurrent();
         if (!mapping) {
-          const response = await options.client.createCaptureView(
-            remoteSet.remoteId,
-            {
-              angle: capture.angle,
-              anatomicalSite: null,
-              asset: {
-                mediaKind: "image",
-                mimeType: asset.mimeType,
-                byteSize: asset.byteSize,
-                sha256: asset.sha256,
-                widthPx: asset.widthPx,
-                heightPx: asset.heightPx,
-                durationMs: null,
-                inputOrigin: capture.inputOrigin,
-                encrypted: true,
-                retentionExpiresAt: null,
+          const response = await checked(() =>
+            options.client.createCaptureView(
+              remoteSet.remoteId,
+              {
+                angle: capture.angle,
+                anatomicalSite: null,
+                asset: {
+                  mediaKind: "image",
+                  mimeType: asset.mimeType,
+                  byteSize: asset.byteSize,
+                  sha256: asset.sha256,
+                  widthPx: asset.widthPx,
+                  heightPx: asset.heightPx,
+                  durationMs: null,
+                  inputOrigin: capture.inputOrigin,
+                  encrypted: true,
+                  retentionExpiresAt: null,
+                },
+                sourceVideoAssetId: null,
+                qualityAccepted: true,
+                qualityReasons: capture.quality.reasons,
+                ordinal,
+                capturedAt: capture.capturedAt,
+                makePrimary:
+                  capture.angle === "primary" || capture.angle === "straight",
               },
-              sourceVideoAssetId: null,
-              qualityAccepted: true,
-              qualityReasons: capture.quality.reasons,
-              ordinal,
-              capturedAt: capture.capturedAt,
-              makePrimary:
-                capture.angle === "primary" || capture.angle === "straight",
-            },
-            deterministicKey("capture-view", capture.id),
+              deterministicKey("capture-view", capture.id),
+            ),
           );
           const remoteView = response.views.find(
             (view) =>
@@ -368,12 +395,13 @@ export async function syncProductResources(options: {
           );
         }
         if (!mapping.uploaded) {
-          const ticket = await options.client.requestAssetUpload(
-            mapping.assetId,
+          const assetId = mapping.assetId;
+          const ticket = await checked(() =>
+            options.client.requestAssetUpload(assetId),
           );
-          await uploadPreparedAsset({ ticket, asset });
-          const finalized = await options.client.finalizeAssetUpload(
-            mapping.assetId,
+          await checked(() => uploadPreparedAsset({ ticket, asset }));
+          const finalized = await checked(() =>
+            options.client.finalizeAssetUpload(assetId),
           );
           if (
             !finalized.checksumVerified ||
@@ -426,43 +454,45 @@ export async function syncProductResources(options: {
       primaryMapping.byteSize <= 1_750_000 &&
       !mappings.has(jobKey)
     ) {
-      const job = await options.client.createJob(
-        "analysis",
-        {
-          kind: "analysis",
-          contractVersion: "1.1.0",
-          captureId: primaryMapping.remoteId,
-          image: {
-            assetId: primaryMapping.assetId,
-            sha256: primaryMapping.sha256,
-            mediaType: primaryMapping.mimeType,
-            sizeBytes: primaryMapping.byteSize,
+      const job = await checked(() =>
+        options.client.createJob(
+          "analysis",
+          {
+            kind: "analysis",
+            contractVersion: "1.1.0",
+            captureId: primaryMapping.remoteId,
+            image: {
+              assetId: primaryMapping.assetId,
+              sha256: primaryMapping.sha256,
+              mediaType: primaryMapping.mimeType,
+              sizeBytes: primaryMapping.byteSize,
+            },
+            selectedRegion: primary.region,
+            requestedHeads: [
+              "segmentation",
+              "anatomy",
+              "appearance",
+              "disease_research",
+              "lesion_reidentification",
+              "quality_control",
+              "oral_tissue_segmentation",
+              "out_of_distribution",
+              "secondary_segmentation",
+            ],
+            inputOrigin: "live_capture",
+            ...(primary.calibrationRequested
+              ? {
+                  calibration: {
+                    cardVersion: "stoma3d-calibration-v1",
+                    markerId: 17,
+                    markerSideMm: 20,
+                    planeConfirmed: primary.calibrationPlaneConfirmed === true,
+                  },
+                }
+              : {}),
           },
-          selectedRegion: primary.region,
-          requestedHeads: [
-            "segmentation",
-            "anatomy",
-            "appearance",
-            "disease_research",
-            "lesion_reidentification",
-            "quality_control",
-            "oral_tissue_segmentation",
-            "out_of_distribution",
-            "secondary_segmentation",
-          ],
-          inputOrigin: "live_capture",
-          ...(primary.calibrationRequested
-            ? {
-                calibration: {
-                  cardVersion: "stoma3d-calibration-v1",
-                  markerId: 17,
-                  markerSideMm: 20,
-                  planeConfirmed: primary.calibrationPlaneConfirmed === true,
-                },
-              }
-            : {}),
-        },
-        deterministicKey("analysis-job", localSetId),
+          deterministicKey("analysis-job", localSetId),
+        ),
       );
       const mapping: CloudResourceMapping = {
         kind: "analysis_job",
@@ -503,16 +533,19 @@ export async function syncProductResources(options: {
         mappings,
         jobs: jobCache,
         runs: runCache,
+        assertCurrent: options.assertCurrent,
       });
       if (firstObservation) break;
     }
     if (!firstObservation) continue;
-    const lesion = await options.client.createLesion(
-      {
-        firstObservationId: firstObservation.observationId,
-        label: null,
-      },
-      deterministicKey("lesion", pin.id),
+    const lesion = await checked(() =>
+      options.client.createLesion(
+        {
+          firstObservationId: firstObservation.observationId,
+          label: null,
+        },
+        deterministicKey("lesion", pin.id),
+      ),
     );
     const lesionMapping: CloudResourceMapping = {
       kind: "lesion",
@@ -559,6 +592,7 @@ export async function syncProductResources(options: {
         mappings,
         jobs: jobCache,
         runs: runCache,
+        assertCurrent: options.assertCurrent,
       }),
       remoteObservationForCapture({
         client: options.client,
@@ -567,6 +601,7 @@ export async function syncProductResources(options: {
         mappings,
         jobs: jobCache,
         runs: runCache,
+        assertCurrent: options.assertCurrent,
       }),
     ]);
     if (!baselineObservation || !currentObservation) continue;
@@ -586,20 +621,22 @@ export async function syncProductResources(options: {
       const hasAutomaticEvidence =
         comparison.candidateMatchScore !== null &&
         Object.keys(comparison.modelVersions).length > 0;
-      const proposal = await options.client.createMatchProposal(
-        {
-          currentObservationId: currentObservation.observationId,
-          candidatePriorObservationId: baselineObservation.observationId,
-          candidateLesionId,
-          proposalOrigin: hasAutomaticEvidence
-            ? "automatic_model"
-            : "user_selected",
-          score: hasAutomaticEvidence ? comparison.candidateMatchScore : null,
-          rank: hasAutomaticEvidence ? 1 : null,
-          modelVersions: hasAutomaticEvidence ? comparison.modelVersions : {},
-          expiresAt: null,
-        },
-        deterministicKey("match-proposal", comparisonId),
+      const proposal = await checked(() =>
+        options.client.createMatchProposal(
+          {
+            currentObservationId: currentObservation.observationId,
+            candidatePriorObservationId: baselineObservation.observationId,
+            candidateLesionId,
+            proposalOrigin: hasAutomaticEvidence
+              ? "automatic_model"
+              : "user_selected",
+            score: hasAutomaticEvidence ? comparison.candidateMatchScore : null,
+            rank: hasAutomaticEvidence ? 1 : null,
+            modelVersions: hasAutomaticEvidence ? comparison.modelVersions : {},
+            expiresAt: null,
+          },
+          deterministicKey("match-proposal", comparisonId),
+        ),
       );
       proposalMapping = {
         kind: "match_proposal",
@@ -616,13 +653,15 @@ export async function syncProductResources(options: {
     if (!mappings.has(decisionKey)) {
       // This transmits the person's prior, explicit in-app confirmation. It is
       // never called for an automated suggestion or an unconfirmed pair.
-      const decision = await options.client.decideMatchProposal(
-        proposalMapping.remoteId,
-        {
-          decision: "confirmed",
-          rationale: "Confirmed by the user after reviewing both images.",
-        },
-        deterministicKey("match-decision", comparisonId),
+      const decision = await checked(() =>
+        options.client.decideMatchProposal(
+          proposalMapping.remoteId,
+          {
+            decision: "confirmed",
+            rationale: "Confirmed by the user after reviewing both images.",
+          },
+          deterministicKey("match-decision", comparisonId),
+        ),
       );
       const decisionMapping: CloudResourceMapping = {
         kind: "match_decision",
@@ -660,10 +699,12 @@ export async function syncProductResources(options: {
       currentMapping,
     });
     if (!payload) continue;
-    const job = await options.client.createJob(
-      "comparison",
-      payload,
-      deterministicKey("comparison-job", comparisonId),
+    const job = await checked(() =>
+      options.client.createJob(
+        "comparison",
+        payload,
+        deterministicKey("comparison-job", comparisonId),
+      ),
     );
     const jobMapping: CloudResourceMapping = {
       kind: "comparison_job",
@@ -675,6 +716,7 @@ export async function syncProductResources(options: {
     mappings.set(comparisonJobKey, jobMapping);
     result.comparisonJobsCreated += 1;
   }
+  options.assertCurrent();
   return result;
 }
 

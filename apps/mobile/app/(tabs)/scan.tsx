@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -27,13 +27,36 @@ export default function ScanRoute() {
   const activeSessionId = useStoma3DStore((state) => state.activeSessionId);
   const setActiveSession = useStoma3DStore((state) => state.setActiveSession);
   const [otherScansOpen, setOtherScansOpen] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [openingError, setOpeningError] = useState<string | null>(null);
+  const openingRef = useRef(false);
   const session =
     sessions.find((item) => item.id === activeSessionId && !item.demo) ??
     resumableSession(sessions, captures, null);
+  const openSession = async (sessionId: string, navigate?: () => void) => {
+    if (openingRef.current) return;
+    openingRef.current = true;
+    setOpening(true);
+    setOpeningError(null);
+    try {
+      await setActiveSession(sessionId);
+      navigate?.();
+    } catch (error) {
+      setOpeningError(
+        error instanceof Error
+          ? error.message
+          : "The selected scan could not be saved. Try again.",
+      );
+    } finally {
+      openingRef.current = false;
+      setOpening(false);
+    }
+  };
   const openCapture = (region: MouthRegion, angle: CaptureAngle) => {
     if (!session) return;
-    setActiveSession(session.id);
-    router.push({ pathname: "/capture/[region]", params: { region, angle } });
+    void openSession(session.id, () =>
+      router.push({ pathname: "/capture/[region]", params: { region, angle } }),
+    );
   };
   if (!session)
     return (
@@ -64,6 +87,14 @@ export default function ScanRoute() {
   const complete = next === null;
   return (
     <Screen title={complete ? "Scan complete" : "Your scan"}>
+      {openingError ? (
+        <Text
+          accessibilityRole="alert"
+          style={[styles.body, { color: theme.danger }]}
+        >
+          {openingError}
+        </Text>
+      ) : null}
       <View style={styles.progressHeading}>
         <Text style={[styles.progressText, { color: theme.text }]}>
           {progress.completeRegions} of 8 regions
@@ -112,6 +143,8 @@ export default function ScanRoute() {
           <Button
             label="Continue scan"
             icon="camera-outline"
+            disabled={opening}
+            loading={opening}
             onPress={() => openCapture(next.region, next.angle)}
           />
         </View>
@@ -124,9 +157,10 @@ export default function ScanRoute() {
           <Button
             label="Create report"
             icon="document-text-outline"
+            disabled={opening}
+            loading={opening}
             onPress={() => {
-              setActiveSession(session.id);
-              router.push("/report");
+              void openSession(session.id, () => router.push("/report"));
             }}
           />
         </>
@@ -135,7 +169,10 @@ export default function ScanRoute() {
         label="View on 3D map"
         icon="cube-outline"
         variant="ghost"
-        onPress={() => router.push("/(tabs)/map")}
+        disabled={opening}
+        onPress={() => {
+          if (!openingRef.current) router.push("/(tabs)/map");
+        }}
       />
       <SectionTitle title="Mouth regions" />
       <View>
@@ -162,14 +199,16 @@ export default function ScanRoute() {
               key={region.id}
               accessibilityRole="button"
               accessibilityLabel={`${region.label}, ${done ? "saved" : "not captured"}${resultReady ? ", open result" : ""}`}
-              onPress={() =>
-                resultReady
-                  ? router.push({
-                      pathname: "/result/[captureId]",
-                      params: { captureId: latest.id },
-                    })
-                  : openCapture(region.id, angle)
-              }
+              disabled={opening}
+              onPress={() => {
+                if (openingRef.current) return;
+                if (resultReady)
+                  router.push({
+                    pathname: "/result/[captureId]",
+                    params: { captureId: latest.id },
+                  });
+                else openCapture(region.id, angle);
+              }}
               style={({ pressed }) => [
                 styles.regionRow,
                 { borderBottomColor: theme.border },
@@ -222,7 +261,10 @@ export default function ScanRoute() {
         label="Start a new scan"
         variant="ghost"
         icon="add-outline"
-        onPress={() => router.push("/onboarding")}
+        disabled={opening}
+        onPress={() => {
+          if (!openingRef.current) router.push("/onboarding");
+        }}
       />
       {sessions.filter((item) => !item.demo).length > 1 ? (
         <>
@@ -241,7 +283,10 @@ export default function ScanRoute() {
                     key={item.id}
                     label={`${new Date(item.createdAt).toLocaleString()}${item.id === session.id ? " · Current" : ""}`}
                     variant="secondary"
-                    onPress={() => setActiveSession(item.id)}
+                    disabled={opening}
+                    onPress={() => {
+                      void openSession(item.id);
+                    }}
                   />
                 ))
             : null}
