@@ -148,7 +148,7 @@ async function finalizeCompletedDeletion(
   await clearCloudState();
   await deleteCloudSyncKey(receipt.accountId);
   await clearCloudInstallationIdentity(receipt.accountId);
-  useStoma3DStore.getState().updateSettings({ analyticsOptIn: false });
+  await useStoma3DStore.getState().updateSettings({ analyticsOptIn: false });
   await clearCloudCredentials();
   // The receipt is deliberately cleared last. If any prior cleanup step fails,
   // the completed receipt keeps the next launch in fail-closed deletion mode.
@@ -165,7 +165,12 @@ async function abandonCloudSession(accountId: string): Promise<void> {
     deleteCloudSyncKey(accountId),
     clearCloudInstallationIdentity(accountId),
   ]);
-  useStoma3DStore.getState().updateSettings({ analyticsOptIn: false });
+  // Credential removal must still produce the blocked deletion outcome even
+  // when queued local settings cannot be committed.
+  await useStoma3DStore
+    .getState()
+    .updateSettings({ analyticsOptIn: false })
+    .catch(() => undefined);
 }
 
 function deletionState(
@@ -218,6 +223,26 @@ function untrackableDeletionState(error: string) {
 
 export const useCloudStore = create<CloudState>((set, get) => {
   const configuration = cloudConfigurationStatus();
+  // Async local commits can outlive sign-out or deletion. Only the current
+  // lifecycle owner may publish the account and consent captured before await.
+  let sessionEpoch = 0;
+  const ownsSession = (epoch: number) => epoch === sessionEpoch;
+  const mayPublishAccount = (epoch: number) =>
+    ownsSession(epoch) &&
+    !cloudDeletionIsPending(get()) &&
+    get().sessionStatus !== "unavailable" &&
+    get().sessionStatus !== "recreation_required";
+  const abandonAndBlockCloudSession = async (accountId: string) => {
+    // The account is already in deletion mode. Do not expose its previous
+    // consent or signed-in state while device cleanup waits for local writes.
+    sessionEpoch += 1;
+    set(
+      untrackableDeletionState(
+        "Cloud deletion is active without a protected status receipt. Cloud features remain paused during device cleanup.",
+      ),
+    );
+    await abandonCloudSession(accountId);
+  };
   return {
     configured: configuration.configured,
     configurationMessage: configuration.message,
@@ -245,43 +270,74 @@ export const useCloudStore = create<CloudState>((set, get) => {
     productConsent: null,
 
     bootstrap: async () => {
+      const epoch = ++sessionEpoch;
       const deletionOutcome = await resumePendingDeletion({
-        readReceipt: readDeletionPollingReceipt,
+        readReceipt: async () => {
+          const read = await readDeletionPollingReceipt();
+          if (read.kind !== "missing") {
+            sessionEpoch += 1;
+            // Finalization can await the local mutation queue. Block normal
+            // cloud work as soon as a protected receipt is discovered.
+            set(
+              deletionState(
+                read.kind === "present" ? read.receipt : null,
+                null,
+              ),
+            );
+          }
+          return read;
+        },
         pollStatus: (requestId) =>
           new PlatformClient().deletionStatus(requestId),
         persistReceipt: persistDeletionPollingReceipt,
         finalizeCompleted: finalizeCompletedDeletion,
       });
       if (deletionOutcome.mode !== "normal") {
-        await unregisterCloudBackgroundSync().catch(() => undefined);
-        useStoma3DStore.getState().updateSettings({ analyticsOptIn: false });
         set(
           deletionOutcome.mode === "deletion_completed"
             ? completedDeletionState(deletionOutcome.receipt)
             : deletionState(deletionOutcome.receipt, deletionOutcome.error),
         );
+        await unregisterCloudBackgroundSync().catch(() => undefined);
+        if (deletionOutcome.mode === "deletion_pending") {
+          try {
+            await useStoma3DStore
+              .getState()
+              .updateSettings({ analyticsOptIn: false });
+          } catch (error) {
+            set({ error: deletionOutcome.error ?? friendlyError(error) });
+          }
+        }
         return;
       }
+      if (!ownsSession(epoch)) return;
       if (!configuration.configured) {
         set({ sessionStatus: "unavailable" });
         return;
       }
+      if (!mayPublishAccount(epoch)) return;
       try {
         const restored = await restoreCloudSession();
+        if (!mayPublishAccount(epoch)) return;
         if (!restored) {
           set({ sessionStatus: "signed_out" });
           return;
         }
         const client = new PlatformClient();
         const account = await client.account();
+        if (!mayPublishAccount(epoch)) return;
         const deletionGuard = await guardUnreceiptedServerDeletion(
           account,
-          abandonCloudSession,
+          abandonAndBlockCloudSession,
         );
         if (deletionGuard.kind === "blocked") {
-          set(untrackableDeletionState(deletionGuard.error));
+          set({
+            ...untrackableDeletionState(deletionGuard.error),
+            busy: false,
+          });
           return;
         }
+        if (!mayPublishAccount(epoch)) return;
         const [
           summary,
           storedShareUrls,
@@ -293,10 +349,12 @@ export const useCloudStore = create<CloudState>((set, get) => {
           client.analyticsConsent(),
           loadProductConsentState(client),
         ]);
+        if (!mayPublishAccount(epoch)) return;
         const cloudWorkEnabled = !account.deletionPending;
-        useStoma3DStore.getState().updateSettings({
+        await useStoma3DStore.getState().updateSettings({
           analyticsOptIn: cloudWorkEnabled && analyticsConsent.enabled,
         });
+        if (!mayPublishAccount(epoch)) return;
         set({
           account,
           analyticsConsent,
@@ -318,6 +376,7 @@ export const useCloudStore = create<CloudState>((set, get) => {
         });
         if (cloudWorkEnabled && productConsentState.activeConsent) {
           await registerCloudBackgroundSync().catch(() => undefined);
+          if (!mayPublishAccount(epoch)) return;
         }
         void trackProductEvent({
           name: "app_opened",
@@ -327,8 +386,10 @@ export const useCloudStore = create<CloudState>((set, get) => {
         if (cloudWorkEnabled && productConsentState.activeConsent)
           await get().syncNow();
       } catch (error) {
+        if (!mayPublishAccount(epoch)) return;
         if (isCloudError(error) && error.code === "unauthenticated") {
           await clearCloudCredentials().catch(() => undefined);
+          if (!mayPublishAccount(epoch)) return;
           set({ sessionStatus: "signed_out", account: null });
           return;
         }
@@ -341,6 +402,7 @@ export const useCloudStore = create<CloudState>((set, get) => {
           return;
         }
         const summary = await cloudSyncSummary().catch(() => null);
+        if (!mayPublishAccount(epoch)) return;
         set({
           sessionStatus: "signed_in",
           error: friendlyError(error),
@@ -361,29 +423,38 @@ export const useCloudStore = create<CloudState>((set, get) => {
         set({ error: DELETION_MODE_MESSAGE });
         return;
       }
+      const epoch = ++sessionEpoch;
       set({ busy: true, error: null, sessionStatus: "signing_in" });
       let authenticated = false;
       try {
         await signInToCloud();
         authenticated = true;
+        if (!mayPublishAccount(epoch)) return;
         const client = new PlatformClient();
         const account = await client.account();
+        if (!mayPublishAccount(epoch)) return;
         const deletionGuard = await guardUnreceiptedServerDeletion(
           account,
-          abandonCloudSession,
+          abandonAndBlockCloudSession,
         );
         if (deletionGuard.kind === "blocked") {
-          set(untrackableDeletionState(deletionGuard.error));
+          set({
+            ...untrackableDeletionState(deletionGuard.error),
+            busy: false,
+          });
           return;
         }
+        if (!mayPublishAccount(epoch)) return;
         const [analyticsConsent, productConsentState] = await Promise.all([
           client.analyticsConsent(),
           loadProductConsentState(client),
         ]);
+        if (!mayPublishAccount(epoch)) return;
         const cloudWorkEnabled = !account.deletionPending;
-        useStoma3DStore.getState().updateSettings({
+        await useStoma3DStore.getState().updateSettings({
           analyticsOptIn: cloudWorkEnabled && analyticsConsent.enabled,
         });
+        if (!mayPublishAccount(epoch)) return;
         set({
           account,
           analyticsConsent,
@@ -395,10 +466,13 @@ export const useCloudStore = create<CloudState>((set, get) => {
         });
         if (cloudWorkEnabled && productConsentState.activeConsent) {
           await registerCloudBackgroundSync().catch(() => undefined);
+          if (!mayPublishAccount(epoch)) return;
           await get().syncNow();
+          if (!mayPublishAccount(epoch)) return;
         }
         await get().refreshAccountData();
       } catch (error) {
+        if (!mayPublishAccount(epoch)) return;
         const sessionRejected =
           isCloudError(error) && error.code === "unauthenticated";
         if (isCloudError(error) && error.code === "recreation_required") {
@@ -419,6 +493,7 @@ export const useCloudStore = create<CloudState>((set, get) => {
         }
         if (authenticated) {
           await clearCloudCredentials().catch(() => undefined);
+          if (!mayPublishAccount(epoch)) return;
         }
         set({
           sessionStatus: "signed_out",
@@ -426,7 +501,7 @@ export const useCloudStore = create<CloudState>((set, get) => {
           error: friendlyError(error),
         });
       } finally {
-        set({ busy: false });
+        if (ownsSession(epoch)) set({ busy: false });
       }
     },
 
@@ -435,11 +510,13 @@ export const useCloudStore = create<CloudState>((set, get) => {
         set({ error: DELETION_MODE_MESSAGE });
         return;
       }
+      const epoch = ++sessionEpoch;
       set({ busy: true, error: null });
       try {
         await unregisterCloudBackgroundSync().catch(() => undefined);
+        if (!ownsSession(epoch)) return;
         await signOutOfCloud();
-        useStoma3DStore.getState().updateSettings({ analyticsOptIn: false });
+        if (!ownsSession(epoch)) return;
         set({
           sessionStatus: "signed_out",
           account: null,
@@ -459,18 +536,23 @@ export const useCloudStore = create<CloudState>((set, get) => {
           consentDocument: null,
           productConsent: null,
         });
+        await useStoma3DStore
+          .getState()
+          .updateSettings({ analyticsOptIn: false });
       } catch (error) {
-        set({ error: friendlyError(error) });
+        if (ownsSession(epoch)) set({ error: friendlyError(error) });
       } finally {
-        set({ busy: false });
+        if (ownsSession(epoch)) set({ busy: false });
       }
     },
 
     recreateAccount: async () => {
       if (get().sessionStatus !== "recreation_required") return;
+      const epoch = ++sessionEpoch;
       set({ busy: true, error: null });
       try {
         const response = await new PlatformClient().recreateAccount();
+        if (!ownsSession(epoch) || cloudDeletionIsPending(get())) return;
         set({
           account: response.account,
           sessionStatus: "signed_in",
@@ -478,9 +560,9 @@ export const useCloudStore = create<CloudState>((set, get) => {
         });
         await get().refreshAccountData();
       } catch (error) {
-        set({ error: friendlyError(error) });
+        if (ownsSession(epoch)) set({ error: friendlyError(error) });
       } finally {
-        set({ busy: false });
+        if (ownsSession(epoch)) set({ busy: false });
       }
     },
 
@@ -540,28 +622,36 @@ export const useCloudStore = create<CloudState>((set, get) => {
 
     refreshAccountData: async () => {
       if (get().sessionStatus !== "signed_in") return;
+      const epoch = sessionEpoch;
       set({ busy: true, error: null });
       try {
         const client = new PlatformClient();
         const account = await client.account();
+        if (!mayPublishAccount(epoch)) return;
         const deletionGuard = await guardUnreceiptedServerDeletion(
           account,
-          abandonCloudSession,
+          abandonAndBlockCloudSession,
         );
         if (deletionGuard.kind === "blocked") {
-          set(untrackableDeletionState(deletionGuard.error));
+          set({
+            ...untrackableDeletionState(deletionGuard.error),
+            busy: false,
+          });
           return;
         }
+        if (!mayPublishAccount(epoch)) return;
         const [lists, analyticsConsent, productConsentState] =
           await Promise.all([
             loadRemoteLists(client),
             client.analyticsConsent(),
             loadProductConsentState(client),
           ]);
+        if (!mayPublishAccount(epoch)) return;
         const cloudWorkEnabled = !account.deletionPending;
-        useStoma3DStore.getState().updateSettings({
+        await useStoma3DStore.getState().updateSettings({
           analyticsOptIn: cloudWorkEnabled && analyticsConsent.enabled,
         });
+        if (!mayPublishAccount(epoch)) return;
         set({
           account,
           analyticsConsent,
@@ -574,9 +664,9 @@ export const useCloudStore = create<CloudState>((set, get) => {
           ...(lists.jobs ? { jobs: lists.jobs } : {}),
         });
       } catch (error) {
-        set({ error: friendlyError(error) });
+        if (mayPublishAccount(epoch)) set({ error: friendlyError(error) });
       } finally {
-        set({ busy: false });
+        if (ownsSession(epoch)) set({ busy: false });
       }
     },
 
@@ -788,6 +878,7 @@ export const useCloudStore = create<CloudState>((set, get) => {
           "Refresh the signed-in account before requesting cloud deletion.",
         );
       }
+      let epoch = ++sessionEpoch;
       set({ busy: true, error: null });
       let requestedReceipt: DeletionPollingReceipt | null = null;
       try {
@@ -798,16 +889,20 @@ export const useCloudStore = create<CloudState>((set, get) => {
           accountId: account.id,
           response: deletion,
           persistReceipt: persistDeletionPollingReceipt,
-          abandonUntrackableDeletion: () => abandonCloudSession(account.id),
+          abandonUntrackableDeletion: () =>
+            abandonAndBlockCloudSession(account.id),
         });
         if (protection.kind === "untrackable") {
-          set(untrackableDeletionState(protection.error));
+          set({ ...untrackableDeletionState(protection.error), busy: false });
           return;
         }
         requestedReceipt = protection.receipt;
-        await unregisterCloudBackgroundSync().catch(() => undefined);
-        useStoma3DStore.getState().updateSettings({ analyticsOptIn: false });
+        epoch = ++sessionEpoch;
         set(deletionState(requestedReceipt, null));
+        await unregisterCloudBackgroundSync().catch(() => undefined);
+        await useStoma3DStore
+          .getState()
+          .updateSettings({ analyticsOptIn: false });
         const cleanup = await Promise.allSettled([
           clearCloudState(),
           deleteCloudSyncKey(account.id),
@@ -833,26 +928,30 @@ export const useCloudStore = create<CloudState>((set, get) => {
           }
         }
       } catch (error) {
-        if (requestedReceipt) {
-          await unregisterCloudBackgroundSync().catch(() => undefined);
-          useStoma3DStore.getState().updateSettings({ analyticsOptIn: false });
+        if (requestedReceipt && ownsSession(epoch)) {
           set(
             deletionState(
               requestedReceipt,
               "Cloud deletion started and its protected receipt was saved, but device cleanup did not finish. Retry the status check and keep the app installed.",
             ),
           );
-        } else {
+          await unregisterCloudBackgroundSync().catch(() => undefined);
+          await useStoma3DStore
+            .getState()
+            .updateSettings({ analyticsOptIn: false })
+            .catch(() => undefined);
+        } else if (ownsSession(epoch)) {
           set({ error: friendlyError(error) });
         }
         throw error;
       } finally {
-        set({ busy: false });
+        if (ownsSession(epoch)) set({ busy: false });
       }
     },
 
     refreshDeletion: async () => {
       if (!cloudDeletionIsPending(get()) && !get().deletion) return;
+      sessionEpoch += 1;
       set({ busy: true, error: null });
       try {
         const outcome = await resumePendingDeletion({
@@ -890,6 +989,7 @@ export const useCloudStore = create<CloudState>((set, get) => {
     },
 
     setAnalyticsOptIn: async (enabled) => {
+      const epoch = sessionEpoch;
       set({ busy: true, error: null });
       try {
         if (get().sessionStatus !== "signed_in") {
@@ -898,7 +998,10 @@ export const useCloudStore = create<CloudState>((set, get) => {
               "Sign in before enabling limited product analytics.",
             );
           }
-          useStoma3DStore.getState().updateSettings({ analyticsOptIn: false });
+          await useStoma3DStore
+            .getState()
+            .updateSettings({ analyticsOptIn: false });
+          if (!ownsSession(epoch)) return;
           set({ analyticsConsent: null });
           return;
         }
@@ -910,15 +1013,17 @@ export const useCloudStore = create<CloudState>((set, get) => {
         const consent = await new PlatformClient().updateAnalyticsConsent(
           enabled,
         );
-        useStoma3DStore.getState().updateSettings({
+        if (!mayPublishAccount(epoch)) return;
+        await useStoma3DStore.getState().updateSettings({
           analyticsOptIn: consent.enabled,
         });
+        if (!mayPublishAccount(epoch)) return;
         set({ analyticsConsent: consent });
       } catch (error) {
-        set({ error: friendlyError(error) });
+        if (ownsSession(epoch)) set({ error: friendlyError(error) });
         throw error;
       } finally {
-        set({ busy: false });
+        if (ownsSession(epoch)) set({ busy: false });
       }
     },
 
