@@ -39,7 +39,16 @@ function patchAppBuildGradle(contents) {
     `${indentation}    hermesFlags = ["-O"]`,
     `${indentation}}`,
   );
-  return lines.join("\n");
+  // Release bundles must include the current Expo public configuration even
+  // when only an ignored .env file or a process environment value has changed.
+  // https://docs.gradle.org/current/userguide/incremental_build.html
+  return `${lines.join("\n").trimEnd()}
+
+// Expo reads .env files and public environment values outside Gradle's JS inputs.
+tasks.matching { it.name == "createBundleReleaseJsAndAssets" }.configureEach {
+    outputs.upToDateWhen { false }
+}
+`;
 }
 
 function withLocalExpoCli(config) {

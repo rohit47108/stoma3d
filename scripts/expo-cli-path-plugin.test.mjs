@@ -23,8 +23,29 @@ test("keeps Expo CLI local and gates Hermes source maps for short-path builds", 
     if ((findProperty("stoma3d.disableHermesSourceMaps") ?: false).toBoolean()) {
         hermesFlags = ["-O"]
     }
-}`,
+}
+
+// Expo reads .env files and public environment values outside Gradle's JS inputs.
+tasks.matching { it.name == "createBundleReleaseJsAndAssets" }.configureEach {
+    outputs.upToDateWhen { false }
+}
+`,
   );
+});
+
+test("refreshes only the release bundle instead of reusing old public configuration", () => {
+  const source = `react {
+    cliFile = new File("@expo/cli")
+    bundleCommand = "export:embed"
+}`;
+  const patched = patchAppBuildGradle(source);
+  assert.match(
+    patched,
+    /tasks\.matching \{ it\.name == "createBundleReleaseJsAndAssets" \}\.configureEach \{\s+outputs\.upToDateWhen \{ false \}\s+\}/,
+  );
+  assert.ok(!patched.includes("createBundleDebugJsAndAssets"));
+  assert.ok(!patched.includes("System.getenv"));
+  assert.equal(patched.match(/outputs\.upToDateWhen/g)?.length, 1);
 });
 
 test("fails prebuild when Expo changes the CLI configuration template", () => {
