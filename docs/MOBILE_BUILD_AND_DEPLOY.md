@@ -159,6 +159,18 @@ devices. iOS internal builds install only on provisioned devices. Production
 artifacts still need store listings, privacy answers, review, and submission;
 creating an artifact does not publish it.
 
+For local Windows builds, run `pnpm android:build-release:windows -- --arch
+arm64-v8a` from the repository root. The helper builds in the existing checkout
+through a short drive alias. Release builds use a 4 GB Gradle heap and at most two
+workers to avoid the observed APK-compression heap failure; debug builds retain
+their existing settings. See Gradle's
+[build environment configuration](https://docs.gradle.org/current/userguide/build_environment.html).
+The Expo configuration plugin refreshes the release JavaScript bundle on each
+build so changed local public URLs or signing-key pins cannot leave an old bundle
+marked up to date. This does not force recompilation of every native dependency.
+These APKs use local test signing, not store signing. Check the embedded public
+URLs and response-verification key before distributing a test package.
+
 Before requesting a remote build, run:
 
 ```powershell
@@ -176,9 +188,10 @@ adds private operational details.
 
 ## What Vercel can and cannot host
 
-Vercel cannot host or install the iOS/Android binary. A custom web domain can
-point to a public information site or the HTTPS API, but opening that domain is
-not the same as installing Stoma3D.
+The [Stoma3D website](https://stoma3d.vercel.app/scan) supports guest scans,
+camera access, photo uploads, analysis, results, and the interactive oral map.
+You can use it on a phone without installing the native app. Vercel hosts this
+web product, not the installable iOS or Android files.
 
 The repository includes a root Vercel configuration for the web app that proxies
 its public API paths to the separately deployed inference service. The inference

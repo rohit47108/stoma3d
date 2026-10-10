@@ -1,8 +1,8 @@
 # Stoma3D usability verification
 
-Snapshot started: 2026-10-01. Updated: 2026-10-03. This record covers the approved usability and reliability plan in `C:\Users\rohit\Projects\oralsight`. It records completed software checks, real-image results, deployments, and remaining checks separately. It is not a completed release sign-off.
+Snapshot started: 2026-10-01. Updated: 2026-10-09. This record covers the approved usability and reliability plan in `C:\Users\rohit\Projects\oralsight`. It records completed software checks, real-image results, deployments, and remaining checks separately. It is not a completed release sign-off.
 
-The latest tested source commit is `98165e27af64c3e3eb6a74ae31e560b60d117653`. These focused implementation commits are pushed to the existing [public Stoma3D repository](https://github.com/rohit47108/stoma3d):
+The previously deployed web source commit is `472d7a3260b59e17f532c8c7517c07180a6b3211`. Native recovery source is now committed through `0d796f57a3ff1f790c677c9d5a25530f0cb76156`; its checks and remaining runtime coverage are recorded below. Earlier implementation commits in the existing [public Stoma3D repository](https://github.com/rohit47108/stoma3d) include:
 
 - `a7ac64c`: Fix capture quality and deployed privacy checks
 - `2a462e1`: Simplify mobile scanning and protect photo recovery
@@ -14,8 +14,11 @@ The latest tested source commit is `98165e27af64c3e3eb6a74ae31e560b60d117653`. T
 - `e395c20`: Add bounded camera startup and stale-photo cancellation
 - `841e782`: Clarify connection-failure retry guidance
 - `98165e2`: Add map rotation controls and intake heading focus
+- `0c9567c`: Recover photo review edits and anatomy mismatches
+- `377662a`: Distinguish oversized photos from decoding failures
+- `472d7a3`: Protect saved scans from stale tab updates
 
-The October 3 web fixes pass source checks and are deployed. A fresh licensed-image upload scan saved all eight regions on that build. Camera-startup recovery, retained-photo network retry, map rotation, and intake focus also passed production interface checks. Physical-camera and remaining platform checks are incomplete.
+The deployed web fixes passed source checks. The October 3 scan saved all eight regions. October 5 checks verified stale-tab rejection, retained-photo retry, and preservation of both tabs' accepted photos. Physical-camera and remaining platform checks are incomplete.
 
 ## Real browser results
 
@@ -84,7 +87,7 @@ The [quality-check record](../quality/QUALITY_CHECKS_2026-10-01.md) covers 80 li
 
 Browser uploads of severely blurred, dark, overexposed, and 64 × 64 pixel controls were rejected. Rejected controls did not increase the new scan’s coverage above 0/8. An unreadable JPEG produced a decode error rather than a blur warning and did not become a saved capture. Specific lighting and image-size messages now pass regression tests.
 
-A rotated dorsal-tongue image was corrected using Rotate 90° and Apply crop. It then returned a signed live analysis and saved as the first accepted region of a separate scan. Glare-heavy and full-face interface cases still need recorded results. The October 3 network retry above covers one interrupted analysis request, not every interruption case.
+A rotated dorsal-tongue image was corrected using Rotate 90° and Apply crop. It then returned a signed live analysis and saved as the first accepted region of a separate scan. The October 3 network retry above covers one interrupted analysis request, not every interruption case.
 
 Production rechecks on that separate scan returned these messages:
 
@@ -93,7 +96,87 @@ Production rechecks on that separate scan returned these messages:
 
 Both rejected candidates remained reviewable, left coverage at 1/8, and preserved the accepted dorsal-tongue capture. Replacing a candidate cleared it and returned to the capture screen; Choose a photo then opened the picker.
 
-## Android emulator results
+Later October 3 production checks also covered these cases:
+
+- A public-domain full-face image received mouth-only crop guidance. Its photo remained reviewable, and saved progress stayed at 3/8. Applying a crop reset confirmation; the cropped image was not submitted for a second analysis.
+- A deliberately clipped-lighting mouth image received “Move away from direct light and try another photo.” Progress stayed at 3/8. This software control is not a physical glare study.
+- A lower-arch image submitted as right cheek received a supported anatomy mismatch. Selecting “Change to lower arch” retained the same photo and reset consent without saving. Fresh confirmation and signed analysis saved the correct region at 4/8, preserving the earlier captures and confirmed observation.
+- Read-only inspection found three encrypted browser records, each with a 12-byte initialization vector and encrypted binary payload. The AES-GCM key was non-extractable, and localStorage contained no entries. No decrypted images or patient identifiers were printed.
+
+### October 5 concurrent-tab recovery
+
+Both production tabs opened the same scan at 5/8 before either saved a new photo. The following sequence used real licensed-image uploads and the signed model service, not injected analysis:
+
+1. The first tab saved upper lip and reached 6/8.
+2. The second tab submitted lower lip from its stale 5/8 scan. Its storage write was rejected rather than overwriting the first tab.
+3. The second tab loaded the latest 6/8 scan and showed “This scan changed in another tab. The latest saved photos are loaded; try again.” Its review image source was unchanged.
+4. Retrying that same photo saved lower lip and reached 7/8.
+5. The map showed both lip captures, all five earlier accepted regions, and the existing confirmed left-cheek observation. No unconfirmed candidate became a pin.
+6. Reloading reopened the scan at 7/8 and resumed upper arch. A final live-model upload saved that region at 8/8. The completed map retained the same confirmed observation.
+
+The local screenshot artifacts are `outputs/usability-checks/web-stale-tab-retry-2026-10-05.jpg`, `outputs/usability-checks/web-concurrent-map-2026-10-05.jpg`, and `outputs/usability-checks/web-concurrent-complete-2026-10-05.jpg`. Keep licensed-image screenshots outside Git. This sequence verifies one actual stale-save conflict and a resumed scan, not a fresh eight-region run or ten consecutive end-to-end scans.
+
+### October 5 local deletion
+
+The owner explicitly approved clearing the three browser test scans. The production Clear device data confirmation removed those records and reset both open tabs to the empty state. History showed “No scans yet” in both tabs, including after reload.
+
+Read-only storage inspection confirmed three encrypted records before deletion and zero afterward. The deletion generation changed. The code clears the old key and records in one transaction; initialization can create a new installation key afterward, so key presence alone is not evidence of retained data. The zero-record count remained after reopening. No cloud or phone data was changed, and no original test images or downloaded report artifacts were deleted.
+
+The screenshot is `outputs/usability-checks/web-deletion-empty-history-2026-10-05.jpg`. This check covers browser deletion and cross-tab reset, not physical-phone deletion or interrupted native cleanup.
+
+### October 9 browser recheck
+
+The fresh scan created after the approved October 5 deletion reopened at 1/8 on the production website. Continue scan opened the next unfinished region, the underside of the tongue.
+
+A different licensed underside-of-tongue image reached the live analysis service but was rejected by anatomy validation: “This photo could not be matched to the selected mouth region. Try a closer, well-lit view.” The review photo remained available with retry and replacement actions, and saved coverage remained 1/8. This is an observed usable-image rejection that still needs model investigation; it is not recorded as a successful second region or as proof that the image was anatomically wrong. No acceptance gate was lowered and no substitute result was supplied.
+
+The screenshot is `outputs/usability-checks/web-region-retry-2026-10-09.jpg`. The newer scan was not deleted under the earlier three-record deletion approval.
+
+Reopening Home and selecting Explore 3D map rendered the partial map at 1/8, with the saved tongue-top result and the remaining seven regions available. The screenshot is `outputs/usability-checks/web-partial-map-2026-10-09.png`. This verifies reopening the existing partial record, not a new completed scan.
+
+A local diagnostic using the hash-validated anatomy artifact predicted ventral tongue for the same source image, but with confidence approximately 0.582, below the release bundle's fixed 0.77 abstention threshold. It therefore abstained. The local anatomy artifact hash and version matched the deployed model card. This diagnostic used the backend's sanitized source pixels, not an exported copy of the browser's review image. The observed rejection is consistent with region-model uncertainty; improving acceptance still requires measured model/preprocessing work, not removal of the gate.
+
+## October 9 native recovery source checks
+
+Native source changes through `0d796f57a3ff1f790c677c9d5a25530f0cb76156` add:
+
+- Lifecycle checks for delayed camera, picker, crop, analysis, and ghost-overlay work; encrypted retry photos can recover after interruption without publishing stale results.
+- A shared pending-save guard so a remounted capture screen does not reopen a photo already waiting to become a saved result.
+- Queued local changes, including rollback and protected-file cleanup, and awaited session, settings, and observation saves.
+- Latest-state cloud merges with durable deletion tombstones, normalized readback, and a visible recovery screen if storage reload or reset fails.
+- Cloud account ownership and upload-plan checks to stop delayed work after sign-out, deletion, or changes to planned records. Staging and sending also check for changes during awaited work.
+- Map-history selection tied to the requested capture and report invalidation across linked observations and comparisons.
+
+The final full JavaScript command passed 634 tests: scripts 24, shared contracts 33, web 178, and mobile 399. Full workspace TypeScript, Prettier, and `git diff --check` passed. Focused tests first reproduced the reset/readback and stale-sync failures before the fixes passed. Controlled native/storage/network boundaries exercise these overlaps; they do not prove physical-device behavior or undo already-sent requests.
+
+The unchanged Python code was rechecked on October 9: 343 tests passed, one PostgreSQL-dependent test was skipped, and Ruff lint/format passed. Web ESLint and the public-mode production build passed, with 34 generated routes. Shared schema generation, dependency checks, and license-notice verification also passed. No secrets, medical test images, environment files, or generated app packages are included in these source commits.
+
+The ignored local mobile environment still pointed at old inference and website hostnames. Its public values were corrected to `https://stoma3d-inference.vercel.app/api`, `https://stoma3d.vercel.app`, and `https://stoma3d.vercel.app/shared`. The inference value matches the checked-in preview and production profiles; the public response-verification key was unchanged. An October 9 health check confirmed live anatomy and segmentation readiness, privacy readiness, required response signing, and no demo fixtures. This does not establish clinical validity.
+
+Fresh Android build results are recorded separately from these source checks below; current installed-app results remain incomplete. The existing [native mutation decision](../decisions/0001-native-mutation-ownership.md) explains the internal ownership changes; persisted schema version 4 and public contracts are unchanged.
+
+### October 9 Android packaging
+
+The first ARM64 release attempt failed in APK compression with `OutOfMemoryError: Java heap space`, not a TypeScript or native compilation error. The Windows release helper now bounds the build to a 4 GB Gradle heap and two workers. A repeat completed successfully.
+
+That repeat exposed a separate stale-bundle problem: Gradle skipped JavaScript generation after the ignored local website URLs changed. The Expo configuration plugin now refreshes the release bundle without forcing all native dependencies to recompile. Both build regressions were reproduced by focused tests before their fixes passed.
+
+A fresh ARM64 build then completed with exit code zero in 1m 24s. Its embedded bundle contains the production website and inference origin and the current public response key, with neither old website nor old inference hostname present. Its native libraries target only ARM64; APK signature and package details are checked separately below. Cloud sync is unconfigured in this guest test build, and a sharing URL is not asserted from compiled-string inspection.
+
+The x86_64 build then completed with exit code zero in 1m 37s. Its embedded public configuration passed the same checks, and its native libraries target only x86_64. Android's signature verifier accepted both packages with the same Android Debug certificate. The ARM64 package identifies as `org.stoma3d.prototype`, version `0.1.0`, version code `1`, label `Stoma3D`. These are locally signed test packages, not store artifacts.
+
+Both packages were built from source `6d4e99e1de9cbc6d9ed67bb92e525ec4e9107974`, with the corrected ignored public environment. Keep them outside Git:
+
+| Artifact                                       | Bytes       | SHA-256                                                            |
+| ---------------------------------------------- | ----------- | ------------------------------------------------------------------ |
+| `outputs/native/Stoma3D-2026-10-09-arm64.apk`  | 97,476,085  | `73f20e4a5fbbdbb3084a5d1793fdfcaa7b3b2c71019ab7d15e2cde8995a74eca` |
+| `outputs/native/Stoma3D-2026-10-09-x86_64.apk` | 101,967,975 | `051307b0cbe8369ac2216e8aeffcc73ad99b4ba37bcd6e003fe02cf87399f9da` |
+
+These builds still emit upstream Gradle deprecation and terminal-color warnings. The warnings did not fail the builds. Current installed-app checks remain incomplete: the emulator became unavailable before the fresh package could be tested. An earlier emulator result is not treated as proof for this new source.
+
+The current iOS JavaScript export also completed with exit code zero, producing one 8.7 MB bundle and 42 assets. This verifies bundling for iOS, not native iPhone compilation, Apple signing, installation, or camera behavior. Expo login remains deferred by the owner.
+
+## Earlier Android emulator results
 
 The rebuilt Android application package (APK) used the production inference endpoint and current response-verification key. These checks ran on an emulator, not a physical phone:
 
@@ -107,7 +190,7 @@ The rebuilt Android application package (APK) used the production inference endp
 
 These checks do not verify real camera focus, physical sensors, iPhone permissions, or a complete native eight-region scan. Native report generation and reopening after an app restart still need runtime verification.
 
-## Source and build checks
+## Earlier source and build checks
 
 The October 3 full JavaScript run passed 404 tests. Full TypeScript checks, web lint, formatting, and the configured production build also passed. Python and native results below remain evidence from the preceding run:
 
@@ -140,13 +223,17 @@ Web regressions cover report/result descriptor parity, bounded map zoom and rota
 
 ## Deployments and build artifacts
 
-The current web deployment `dpl_4BVZbCXqygmMfQcZtHEs6HhqHkH6` is ready at [Stoma3D](https://stoma3d.vercel.app/scan). It contains source commit `98165e27af64c3e3eb6a74ae31e560b60d117653`. Its immutable deployment is [the October 3 Stoma3D web build](https://stoma3d-gltwzxthx-rohit-singhs-projects-48f82479.vercel.app). The fresh eight-region scan and October 3 interface checks above ran against this deployment.
+The current web deployment `dpl_GKvU5XdMYsiUd4TjLyYUSAJ9Pyu6` is ready at [Stoma3D](https://stoma3d.vercel.app/scan). It contains source commit `472d7a3260b59e17f532c8c7517c07180a6b3211`. Its immutable deployment is [the concurrent-save Stoma3D web build](https://stoma3d-dn51imdj9-rohit-singhs-projects-48f82479.vercel.app). The October 5 concurrent-tab checks ran against this deployment.
+
+That source passed 178 web tests across 29 files, web TypeScript, ESLint, Prettier, and the public-mode production build. Both [repository safety](https://github.com/rohit47108/stoma3d/actions/runs/37232110690) and [TypeScript](https://github.com/rohit47108/stoma3d/actions/runs/37232110828) GitHub workflows succeeded. These earlier web checks do not verify the newly committed native changes.
+
+The preceding deployment `dpl_4BVZbCXqygmMfQcZtHEs6HhqHkH6` contains source commit `98165e27af64c3e3eb6a74ae31e560b60d117653`. Its immutable deployment is [the October 3 Stoma3D web build](https://stoma3d-gltwzxthx-rohit-singhs-projects-48f82479.vercel.app). The fresh eight-region scan and earlier October 3 interface checks ran against that deployment.
 
 The preceding web deployment `dpl_GmEduqcKZ4s9PXujc7ty3yT95d7n` contains source commit `b34e423de135cc303544f0ccd7cb35d0ed617871`. Its immutable deployment is [the October 2 Stoma3D web build](https://stoma3d-puyndlyrh-rohit-singhs-projects-48f82479.vercel.app).
 
 The initial eight-region browser scan ran against production deployment `dpl_6Jj24nsC9CShFz8hSubkPn5MkV9x`, not only the local development server. Its stored records reopened on the October 2 replacement deployment. The earlier verified report, bounded zoom, account-entry route, and dark/low-resolution recovery checks ran against that replacement build. A fresh eight-region scan was not repeated on October 2; the October 3 run now records one on the current build.
 
-The inference deployment `dpl_2byfoVn6jBcH3QTmoZykHYAL4mqk` is unchanged by these web fixes. Its [production health endpoint](https://stoma3d-inference.vercel.app/api/healthz) passed the October 2 check with:
+The inference deployment `dpl_2byfoVn6jBcH3QTmoZykHYAL4mqk` is unchanged by these web fixes. Its [production health endpoint](https://stoma3d-inference.vercel.app/api/healthz) passed the October 5 recheck with:
 
 - `privacyReady: true` and `analysisReady: true`
 - Required response signing with signing configured
