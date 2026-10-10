@@ -97,7 +97,15 @@ Eight added regression cases cover the HTML layout, per-page notices and numberi
 
 A separate compatibility check ran the new PDF step against the existing Android export. All 18 pages retained their original text, page dimensions, and eight image references. Every added page notice and number occupied the reserved bottom margin. The ignored compatibility PDF is `outputs/usability-checks/android-report-footer-compatibility-2026-10-10.pdf`. This check retains the old HTML layout: it does not prove updated native pagination or execution on Android or iPhone.
 
-The owner stopped computer testing again with Escape before the new package was installed. Fresh report generation, every-page visual inspection, and restart reopening on `f8ce5ff` remain required. Simulator input has not resumed since that stop.
+The owner stopped computer testing again with Escape before the new package was installed, then approved resuming simulator checks. The `f8ce5ff` x86_64 update installed successfully without clearing app data. A read-only check confirmed that the installed base APK matches the saved package's SHA-256, `6563dcdeb28cd00179f09a45a1e46dd2b33e13d9b0e3b6fce948cff229822610`. Another physical Escape stopped testing before the updated app opened. Fresh report generation, every-page visual inspection, and restart reopening remain required. No further simulator input occurred after that stop.
+
+## Home restoration correction
+
+The earlier installed report-recovery app retained its completed scan and recent result after restart, but Home still called the next scan “Your first scan.” Home now derives first-time or returning wording from saved, non-demo sessions. It also selects the most recent completed result by capture timestamp rather than restored array order. This change adds no persisted fields, changes no records, and leaves scan progression and analysis acceptance unchanged.
+
+Seven route tests cover first use, demo-only records, restored completed and partial scans, cleared records, out-of-order results, and failed or abstained requests. The completed-scan heading and out-of-order result tests failed before their corrections. Independent source review approved the change. These are controlled route checks with real scan logic, not a native UI mount or new simulator restart evidence. The Home update still needs an installed visual check.
+
+The Home source passed 694 JavaScript tests (scripts 24, contracts 33, mobile 427, web 210), full workspace TypeScript and Prettier checks, the repository safety audit, and the current notices/SBOM check. Python passed 349 tests with the existing external PostgreSQL test skipped and one known Starlette warning. Native rebuilds are recorded separately from installed-app verification.
 
 ## Android test packages
 
@@ -112,7 +120,7 @@ The following packages embed the production inference origin and public response
 | `outputs/native/Stoma3D-2026-10-10-report-layout-x86_64.apk`   | `f8ce5ff` | 102,676,027 | `6563dcdeb28cd00179f09a45a1e46dd2b33e13d9b0e3b6fce948cff229822610` |
 | `outputs/native/Stoma3D-2026-10-10-report-layout-arm64.apk`    | `f8ce5ff` |  98,184,137 | `fbef966f940e97b13c17650540aef63e71c2855310c55f256c1ffbee090e53b5` |
 
-The picker-fix x86_64 build finished in 5m 8s; ARM64 finished in 1m 50s. Report-recovery x86_64 finished in 2m 42s; ARM64 finished in 4m 2s. Both report-recovery builds’ embedded report, temporary-file, and capture-route source matched the checked-in files. Report-layout x86_64 finished in 5m 47s; ARM64 finished in 2m 4s. Their embedded report, PDF-footer, and temporary-file source matched the committed source. All packages' native library directories matched their named architectures. Upstream Gradle deprecation warnings remain. Picker-fix and report-recovery x86_64 packages have the installed-emulator coverage recorded above. Report-layout installation and physical ARM64 camera checks remain unverified.
+The picker-fix x86_64 build finished in 5m 8s; ARM64 finished in 1m 50s. Report-recovery x86_64 finished in 2m 42s; ARM64 finished in 4m 2s. Both report-recovery builds’ embedded report, temporary-file, and capture-route source matched the checked-in files. Report-layout x86_64 finished in 5m 47s; ARM64 finished in 2m 4s. Their embedded report, PDF-footer, and temporary-file source matched the committed source. All packages' native library directories matched their named architectures. Upstream Gradle deprecation warnings remain. Picker-fix and report-recovery x86_64 packages have the installed-emulator coverage recorded above. The report-layout x86_64 package is installed, but its new PDF and restart checks remain unverified. Physical ARM64 camera checks remain open.
 
 ## iPhone bundle check
 

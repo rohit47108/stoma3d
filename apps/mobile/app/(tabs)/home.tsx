@@ -29,6 +29,9 @@ export default function HomeRoute() {
     }, []),
   );
   const unfinished = resumableSession(sessions, captures, activeSessionId);
+  // Derive this from protected records so it also updates after local deletion.
+  // https://react.dev/learn/choosing-the-state-structure#avoid-redundant-state
+  const hasPreviousScan = sessions.some((session) => !session.demo);
   const progress = unfinished
     ? detailedScanProgress(captures, unfinished.id, unfinished.protocol)
     : null;
@@ -37,6 +40,10 @@ export default function HomeRoute() {
       (capture) =>
         !capture.samplePlaceholder &&
         analyses[capture.id]?.status === "complete",
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(left.capturedAt) - Date.parse(right.capturedAt),
     )
     .at(-1);
   const recentRegion = MOUTH_REGION_DETAILS.find(
@@ -150,7 +157,11 @@ export default function HomeRoute() {
           <Ionicons name="scan-outline" size={28} color={theme.primary} />
           <View style={styles.scanCopy}>
             <Text style={[styles.scanTitle, { color: theme.text }]}>
-              {unfinished ? "Your scan is waiting" : "Your first scan"}
+              {unfinished
+                ? "Your scan is waiting"
+                : hasPreviousScan
+                  ? "Your next scan"
+                  : "Your first scan"}
             </Text>
             <Text style={[styles.body, { color: theme.secondaryText }]}>
               {progress

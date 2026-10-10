@@ -6,6 +6,8 @@ All notable Stoma3D source-release changes are recorded here.
 
 ### Fixed
 
+- Home distinguishes returning users from first-time scans and opens the newest
+  completed result even when saved records are restored out of order.
 - Native reports use compact print spacing, keep page notices clear of
   headings, and add page numbers before encryption. A failed PDF update is
   discarded and its temporary file is removed.
