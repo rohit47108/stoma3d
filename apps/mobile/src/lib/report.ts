@@ -1,4 +1,6 @@
 import * as Crypto from "expo-crypto";
+import * as FileSystem from "expo-file-system/legacy";
+import { fromByteArray, toByteArray } from "base64-js";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
@@ -23,6 +25,7 @@ import {
   oralObservationMapMarkup,
 } from "@/lib/reportMarkup";
 import { humanizeResultReason } from "@/lib/resultCopy";
+import { addReportPageFooters } from "@/lib/reportPdf";
 import {
   beginReportTemporaryLease,
   removeReportTemporaryFile,
@@ -344,13 +347,18 @@ export async function generateEncryptedObservationReport(
   ];
   const html = `<!doctype html>
   <html><head><meta charset="utf-8" /><style>
-    @page { margin: 34px 28px 52px; }
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; color:#17324D; padding:0; line-height:1.45; }
+    /* Expo Print uses WebView pagination on Android. Reserve bottom space for
+       PDF page notices added after rendering, avoiding fixed-footer overlap.
+       https://docs.expo.dev/versions/v57.0.0/sdk/print/#page-margins */
+    @page { margin: 34px 28px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size:13px; color:#17324D; margin:0; padding:0; line-height:1.4; }
+    p { margin:6px 0; }
     h1 { color:#0B7A75; margin-bottom:2px; } h2 { border-bottom:2px solid #DDF5EE; padding-bottom:6px; }
     .warning { background:#FFF4DF; border:1px solid #D28B16; padding:12px; border-radius:8px; font-weight:700; }
     .demo-watermark { margin:0 0 18px; border:4px solid #B42318; color:#B42318; padding:14px; text-align:center; font-size:20px; font-weight:900; letter-spacing:1px; }
     .meta { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-    .observation { display:grid; grid-template-columns:180px 1fr; gap:18px; margin:16px 0; page-break-inside:avoid; }
+    .observation { display:grid; grid-template-columns:180px minmax(0, 1fr); gap:18px; margin:16px 0; break-inside:avoid; page-break-inside:avoid; }
+    .observation > div { min-width:0; overflow-wrap:anywhere; }
     .capture, .image-missing { width:170px; height:130px; object-fit:cover; border-radius:10px; border:1px solid #DCE6EC; }
     .capture-figure { margin:0; width:170px; }
     .capture-figure figcaption { color:#5D7286; font-size:10px; margin-top:4px; text-align:center; }
@@ -362,12 +370,10 @@ export async function generateEncryptedObservationReport(
     .map-pin { fill:#FFD166; stroke:#7A4D00; stroke-width:2; }
     .image-missing { display:flex; align-items:center; justify-content:center; padding:8px; box-sizing:border-box; color:#5D7286; background:#F5FAF9; }
     table { width:100%; border-collapse:collapse; font-size:11px; margin:12px 0; }
-    th, td { border:1px solid #DCE6EC; padding:7px; text-align:left; vertical-align:top; }
+    th, td { border:1px solid #DCE6EC; padding:7px; text-align:left; vertical-align:top; overflow-wrap:anywhere; }
     th { background:#F5FAF9; color:#17324D; }
-    .page-disclaimer { position:fixed; left:0; right:0; bottom:-36px; border-top:1px solid #DCE6EC; padding-top:6px; color:#536A7C; font-size:10px; font-weight:700; text-align:center; }
     .report-footer { margin-top:32px; color:#5D7286; font-size:11px; }
   </style></head><body>
-    <div class="page-disclaimer">${DISCLAIMER}</div>
     ${syntheticReport ? '<div class="demo-watermark">SYNTHETIC DEMONSTRATION - NOT PATIENT DATA</div>' : ""}
     <h1>${syntheticReport ? "Stoma3D synthetic demonstration report" : "Stoma3D observation report"}</h1>
     <p>Structured visual observations for discussion with a dental or medical professional.</p>
@@ -423,6 +429,19 @@ export async function generateEncryptedObservationReport(
   try {
     const printed = await printReportToFile(html);
     plaintextPdfUri = printed.uri;
+    const bytes = toByteArray(
+      await FileSystem.readAsStringAsync(printed.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      }),
+    );
+    const completedPdf = await addReportPageFooters(bytes);
+    // Reuse the owned Print file rather than creating another plaintext copy.
+    // The report lease and finally cleanup cover reading, stamping and writing.
+    await FileSystem.writeAsStringAsync(
+      printed.uri,
+      fromByteArray(completedPdf),
+      { encoding: FileSystem.EncodingType.Base64 },
+    );
     const encryptedUri = await encryptFile(printed.uri, `report:${reportId}`);
     return {
       id: reportId,

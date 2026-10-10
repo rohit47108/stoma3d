@@ -13,7 +13,7 @@ dataset and model terms and are not included in the public source package.
 - exact installed license/notice texts: 652
 - locked optional Python packages absent on this platform: 21
 - machine-readable inventory: `THIRD_PARTY_SBOM.cdx.json`
-- `pnpm-lock.yaml` SHA-256: `91e252c15028398d9ed38e425df14bf7a894f9959611abd4006d4c4b316a59e3`
+- `pnpm-lock.yaml` SHA-256: `ff57fb4d1b5226c7bd685fca80847402d59e1ef005c3322c0b90c255bcf22378`
 - `uv.lock` SHA-256: `09c0c426ad263a8185b8c9af20d558bd9b1e04282475f7b0ce61f107e621761b`
 
 Packages marked `NOT-IN-RELEASE-ENVIRONMENT` are retained in the uv lock

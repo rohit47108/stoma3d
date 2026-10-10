@@ -6,6 +6,9 @@ All notable Stoma3D source-release changes are recorded here.
 
 ### Fixed
 
+- Native reports use compact print spacing, keep page notices clear of
+  headings, and add page numbers before encryption. A failed PDF update is
+  discarded and its temporary file is removed.
 - Reports finishing after a timeout now clean up their temporary PDF, with a
   deletion retry and next-launch recovery if device storage fails. Active report
   creation stays protected from background cleanup.

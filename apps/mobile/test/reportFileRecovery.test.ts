@@ -5,6 +5,9 @@ const boundary = vi.hoisted(() => ({
   encrypt: vi.fn(),
   deleteFile: vi.fn(),
   fileInfo: vi.fn(),
+  readFile: vi.fn(),
+  writeFile: vi.fn(),
+  footers: vi.fn(),
   files: new Set<string>(),
 }));
 
@@ -19,6 +22,9 @@ vi.mock("expo-file-system/legacy", () => ({
   cacheDirectory: "file:///cache/",
   deleteAsync: boundary.deleteFile,
   getInfoAsync: boundary.fileInfo,
+  EncodingType: { Base64: "base64" },
+  readAsStringAsync: boundary.readFile,
+  writeAsStringAsync: boundary.writeFile,
   readDirectoryAsync: async (directory: string) =>
     [...boundary.files]
       .filter((uri) => uri.startsWith(directory))
@@ -36,6 +42,7 @@ vi.mock(
   () => import("../src/lib/reportCalibration"),
 );
 vi.mock("@/lib/reportMarkup", () => import("../src/lib/reportMarkup"));
+vi.mock("@/lib/reportPdf", () => ({ addReportPageFooters: boundary.footers }));
 vi.mock("@/lib/resultCopy", () => import("../src/lib/resultCopy"));
 vi.mock("@/lib/tempFiles", () => import("../src/lib/tempFiles"));
 vi.mock("@/lib/secureFiles", () => ({
@@ -84,6 +91,9 @@ beforeEach(() => {
     }
   });
   boundary.encrypt.mockResolvedValue("file:///protected/test-report.enc");
+  boundary.readFile.mockResolvedValue("cGRm");
+  boundary.footers.mockResolvedValue(new TextEncoder().encode("stamped pdf"));
+  boundary.writeFile.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -92,6 +102,27 @@ afterEach(() => {
 });
 
 describe("native report file recovery", () => {
+  it("keeps layout notices out of fixed CSS that overlaps headings", async () => {
+    boundary.print.mockResolvedValue({ uri: "file:///cache/Print/layout.pdf" });
+
+    await generateEncryptedObservationReport(input);
+
+    const html = boundary.print.mock.calls[0][0].html as string;
+    expect(html).not.toMatch(/position:\s*fixed/);
+    expect(html).toContain("This result is not a diagnosis.");
+  });
+
+  it("uses explicit print typography and compact paragraph spacing", async () => {
+    boundary.print.mockResolvedValue({ uri: "file:///cache/Print/layout.pdf" });
+
+    await generateEncryptedObservationReport(input);
+
+    const html = boundary.print.mock.calls[0][0].html as string;
+    expect(html).toMatch(/body\s*\{[^}]*font-size:\s*13px/);
+    expect(html).toMatch(/p\s*\{[^}]*margin:\s*6px\s+0/);
+    expect(html).toMatch(/\.observation\s*\{[^}]*break-inside:\s*avoid/);
+  });
+
   it("protects an on-time PDF and removes its unencrypted source", async () => {
     const uri = "file:///cache/Print/on-time.pdf";
     boundary.files.add(uri);
@@ -100,9 +131,38 @@ describe("native report file recovery", () => {
     const report = await generateEncryptedObservationReport(input);
 
     expect(report.encryptedUri).toBe("file:///protected/test-report.enc");
+    expect(boundary.footers).toHaveBeenCalledWith(
+      new TextEncoder().encode("pdf"),
+    );
+    expect(boundary.writeFile).toHaveBeenCalledWith(uri, "c3RhbXBlZCBwZGY=", {
+      encoding: "base64",
+    });
+    expect(boundary.writeFile.mock.invocationCallOrder[0]).toBeLessThan(
+      boundary.encrypt.mock.invocationCallOrder[0]!,
+    );
     expect(boundary.files.has(uri)).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it.each(["reading", "stamping", "writing"])(
+    "cleans up and refuses to save a report when footer %s fails",
+    async (stage) => {
+      const uri = "file:///cache/Print/failed.pdf";
+      boundary.files.add(uri);
+      boundary.print.mockResolvedValue({ uri });
+      const operation = {
+        reading: boundary.readFile,
+        stamping: boundary.footers,
+        writing: boundary.writeFile,
+      }[stage]!;
+      operation.mockRejectedValueOnce(new Error("Report file unavailable"));
+
+      await expect(generateEncryptedObservationReport(input)).rejects.toThrow();
+
+      expect(boundary.encrypt).not.toHaveBeenCalled();
+      expect(boundary.files.has(uri)).toBe(false);
+    },
+  );
 
   it("removes a PDF that finishes after the renderer deadline", async () => {
     let finishPrint!: (value: { uri: string }) => void;
