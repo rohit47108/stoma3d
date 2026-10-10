@@ -8,8 +8,22 @@ from stoma3d_ml.release_training import (
     SUPPLEMENTAL_SEGMENTATION_COLUMNS,
     _build_parser,
     _classification_artifact_name,
+    _classification_interface,
     _load_supplemental_segmentation_manifest,
 )
+
+
+def test_classification_export_records_the_training_resize() -> None:
+    interface = _classification_interface(("first", "second"), 0.5, 0.77)
+    assert interface == {
+        "input_name": "image",
+        "output_name": "logits",
+        "output_kind": "class_logits",
+        "resize_interpolation": "pillow_bilinear",
+        "class_labels": ["first", "second"],
+        "calibration_temperature": 0.5,
+        "abstention_threshold": 0.77,
+    }
 
 
 def test_release_training_accepts_disease_research_task() -> None:

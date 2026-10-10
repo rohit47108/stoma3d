@@ -16,6 +16,7 @@ from typing import Literal, Protocol, TypeAlias
 
 import cv2
 import numpy as np
+from PIL import Image
 
 from .contracts import ModelHead
 
@@ -44,6 +45,7 @@ class OnnxAdapterSpec:
     calibration_temperature: float | None
     abstention_threshold: float | None
     minimum_embedding_dimensions: int | None
+    resize_interpolation: Literal["linear", "pillow_bilinear"] = "linear"
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,11 +120,17 @@ class OpenCVDnnOnnxAdapter:
         if rgb.dtype != np.uint8:
             raise ModelAdapterError("Model input pixels must be uint8 RGB values.")
 
-        resized = cv2.resize(
-            rgb,
-            (self.spec.input_width, self.spec.input_height),
-            interpolation=cv2.INTER_LINEAR,
-        )
+        size = (self.spec.input_width, self.spec.input_height)
+        if self.spec.resize_interpolation == "linear":
+            resized = cv2.resize(rgb, size, interpolation=cv2.INTER_LINEAR)
+        elif self.spec.resize_interpolation == "pillow_bilinear":
+            # Match torchvision's PIL Resize, including antialiasing during
+            # downsampling. This is declared by the release, never guessed.
+            resized = np.asarray(
+                Image.fromarray(rgb).resize(size, Image.Resampling.BILINEAR)
+            )
+        else:
+            raise ModelAdapterError("Unsupported model resize interpolation.")
         tensor = resized.astype(np.float32) / np.float32(255.0)
         mean = np.asarray(self.spec.normalization_mean, dtype=np.float32)
         standard_deviation = np.asarray(

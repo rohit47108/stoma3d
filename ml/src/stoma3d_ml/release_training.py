@@ -356,6 +356,20 @@ def _load_classification_logits(
     )
 
 
+def _classification_interface(
+    labels: Sequence[str], temperature: float, abstention_threshold: float
+) -> dict[str, object]:
+    return {
+        "input_name": "image",
+        "output_name": "logits",
+        "output_kind": "class_logits",
+        "resize_interpolation": "pillow_bilinear",
+        "class_labels": list(labels),
+        "calibration_temperature": temperature,
+        "abstention_threshold": abstention_threshold,
+    }
+
+
 def _classification_artifact_name(task: str) -> str:
     artifact_names = {
         "anatomy": "anatomy.onnx",
@@ -555,14 +569,7 @@ def _train_classification(
         "validation_best_macro_f1": best_macro_f1,
         "test": test_metrics,
         "history": history,
-        "interface": {
-            "input_name": "image",
-            "output_name": "logits",
-            "output_kind": "class_logits",
-            "class_labels": list(labels),
-            "calibration_temperature": temperature,
-            "abstention_threshold": abstention_threshold,
-        },
+        "interface": _classification_interface(labels, temperature, abstention_threshold),
     }
 
 

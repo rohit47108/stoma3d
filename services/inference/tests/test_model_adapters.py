@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 
+import cv2
 import numpy as np
 import pytest
+from PIL import Image
 
 from stoma3d_api.contracts import ModelHead
 from stoma3d_api.model_adapters import (
@@ -123,6 +126,55 @@ def test_adapter_validates_segmentation_and_embedding_outputs() -> None:
     ).predict(np.zeros((3, 4, 3), dtype=np.uint8))
     assert isinstance(embedding, EmbeddingPrediction)
     assert embedding.values == pytest.approx(np.array([0.6, 0.8, 0.0]))
+
+
+def test_classification_can_match_antialiased_pillow_training_resize() -> None:
+    network = _FakeNetwork(np.array([[4.0, 2.0]], dtype=np.float32))
+    spec = replace(
+        _spec(ModelHead.ANATOMY, "class_logits", labels=("first", "second")),
+        resize_interpolation="pillow_bilinear",
+    )
+    rgb = np.random.default_rng(2026).integers(0, 256, (31, 47, 3), dtype=np.uint8)
+    expected_pixels = np.asarray(
+        Image.fromarray(rgb).resize((4, 3), Image.Resampling.BILINEAR)
+    )
+    assert not np.array_equal(expected_pixels, cv2.resize(rgb, (4, 3)))
+    expected = (
+        expected_pixels.astype(np.float32) / np.float32(255.0)
+        - np.asarray(spec.normalization_mean, dtype=np.float32)
+    ) / np.asarray(spec.normalization_std, dtype=np.float32)
+    OpenCVDnnOnnxAdapter(spec, network).predict(rgb)  # type: ignore[arg-type]
+    np.testing.assert_allclose(
+        network.input_tensor, np.transpose(expected, (2, 0, 1))[None], atol=1e-6
+    )
+
+
+def test_legacy_segmentation_keeps_opencv_linear_resize() -> None:
+    spec = _spec(ModelHead.SEGMENTATION, "binary_mask_logits")
+    assert spec.resize_interpolation == "linear"
+    network = _FakeNetwork(np.zeros((1, 1, 4, 4), dtype=np.float32))
+    rgb = np.random.default_rng(2026).integers(0, 256, (31, 47, 3), dtype=np.uint8)
+    expected = (
+        cv2.resize(rgb, (4, 3)).astype(np.float32) / np.float32(255.0)
+        - np.asarray(spec.normalization_mean, dtype=np.float32)
+    ) / np.asarray(spec.normalization_std, dtype=np.float32)
+    OpenCVDnnOnnxAdapter(spec, network).predict(rgb)  # type: ignore[arg-type]
+    np.testing.assert_allclose(
+        network.input_tensor, np.transpose(expected, (2, 0, 1))[None], atol=1e-6
+    )
+
+
+def test_adapter_rejects_unknown_resize_method_before_inference() -> None:
+    spec = replace(
+        _spec(ModelHead.ANATOMY, "class_logits", labels=("first", "second")),
+        resize_interpolation="unknown",  # type: ignore[arg-type]
+    )
+    network = _FakeNetwork(np.array([[4.0, 2.0]], dtype=np.float32))
+    with pytest.raises(ModelAdapterError, match="resize"):
+        OpenCVDnnOnnxAdapter(spec, network).predict(
+            np.zeros((31, 47, 3), dtype=np.uint8)
+        )  # type: ignore[arg-type]
+    assert network.forward_calls == 0
 
 
 @pytest.mark.parametrize(

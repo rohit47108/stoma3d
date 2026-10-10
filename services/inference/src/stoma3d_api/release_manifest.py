@@ -88,7 +88,7 @@ class ModelInterfaceManifest(ImmutableManifestModel):
     input_height: Annotated[int, Field(ge=32, le=4096)]
     pixel_scale: Literal["zero_to_one"]
     resize_mode: Literal["stretch"]
-    resize_interpolation: Literal["linear"]
+    resize_interpolation: Literal["linear", "pillow_bilinear"]
     normalization_mean: tuple[
         Annotated[float, Field(ge=-10, le=10)],
         Annotated[float, Field(ge=-10, le=10)],
@@ -590,6 +590,7 @@ def load_release_runtime(
                 calibration_temperature=interface.calibration_temperature,
                 abstention_threshold=interface.abstention_threshold,
                 minimum_embedding_dimensions=interface.minimum_embedding_dimensions,
+                resize_interpolation=interface.resize_interpolation,
             )
             try:
                 adapter = adapter_loader(adapter_spec)

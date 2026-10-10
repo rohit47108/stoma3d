@@ -264,6 +264,27 @@ def test_enabled_heads_and_hashes_require_a_loaded_adapter(
     assert runtime.artifact_hashes["segmentation_weights"] == digest
 
 
+def test_release_loader_preserves_the_declared_training_resize(tmp_path: Path) -> None:
+    artifact = tmp_path / "anatomy.onnx"
+    artifact.write_bytes(b"audited-test-artifact")
+    head = _enabled_head(
+        "anatomy", "anatomy.onnx", hashlib.sha256(artifact.read_bytes()).hexdigest()
+    )
+    head["interface"]["resizeInterpolation"] = "pillow_bilinear"
+    manifest_path = _write_manifest(tmp_path, [head])
+    loaded: list[OnnxAdapterSpec] = []
+
+    def recording_loader(spec: OnnxAdapterSpec) -> _StubAdapter:
+        loaded.append(spec)
+        return _StubAdapter(spec.head)
+
+    runtime = load_release_runtime(
+        {RELEASE_MANIFEST_ENV: str(manifest_path)}, adapter_loader=recording_loader
+    )
+    assert runtime.heads[ModelHead.ANATOMY].enabled
+    assert loaded[0].resize_interpolation == "pillow_bilinear"
+
+
 def test_auxiliary_safety_heads_have_strict_loadable_interfaces(tmp_path: Path) -> None:
     names = (
         "quality_control",
