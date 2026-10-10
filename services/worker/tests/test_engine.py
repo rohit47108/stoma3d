@@ -109,9 +109,11 @@ class ErrorProcessor:
 
 
 @dataclass
-class SlowProcessor:
+class WaitingProcessor:
+    can_finish: asyncio.Event
+
     async def process(self, envelope, context):
-        await asyncio.sleep(0.025)
+        await self.can_finish.wait()
         return ProcessorResult(outcome=JobOutcome.COMPLETE, result={})
 
 
@@ -257,12 +259,30 @@ async def test_future_job_is_delayed_without_claiming_or_processing(envelope) ->
 
 
 async def test_heartbeat_renews_while_a_job_is_running(envelope) -> None:
-    queue = FakeQueue()
+    can_finish = asyncio.Event()
+    renewals: list[tuple[str, str, int]] = []
+
+    class ObservedQueue(FakeQueue):
+        async def renew_idempotency(self, key, job_id, ttl_seconds):
+            renewals.append((key, job_id, ttl_seconds))
+            if len(renewals) >= 2:
+                can_finish.set()
+
+    queue = ObservedQueue()
     reporter = FakeReporter()
-    await make_engine(queue, reporter, SlowProcessor()).process(
-        QueueMessage("1-0", envelope)
-    )
+    message = QueueMessage("1-0", envelope)
+    # Synchronize on actual renewals, not a 25 ms scheduling assumption.
+    # https://docs.python.org/3.12/library/asyncio-sync.html#asyncio.Event
+    async with asyncio.timeout(5):
+        await make_engine(queue, reporter, WaitingProcessor(can_finish)).process(
+            message
+        )
     assert len(queue.heartbeats) >= 2
+    assert all(
+        renewal == (envelope.idempotency_key, str(envelope.job_id), 600)
+        for renewal in renewals
+    )
+    assert queue.finished == [message]
 
 
 @dataclass
