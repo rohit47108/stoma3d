@@ -1,6 +1,8 @@
 # Stoma3D usability verification
 
-Snapshot started: 2026-10-01. Updated: 2026-10-09. This record covers the approved usability and reliability plan in `C:\Users\rohit\Projects\oralsight`. It records completed software checks, real-image results, deployments, and remaining checks separately. It is not a completed release sign-off.
+Snapshot started: 2026-10-01. Updated: 2026-10-10. This record covers the approved usability and reliability plan in `C:\Users\rohit\Projects\oralsight`. It records completed software checks, real-image results, deployments, and remaining checks separately. It is not a completed release sign-off.
+
+The [October 10 real-image scan record](REAL_IMAGE_FLOW_VERIFICATION_2026-10-10.md) adds ten consecutive complete browser upload scans, report inspection, 65 live-service image controls, the installed Android picker correction, report timeout recovery, and updated Android packages/iOS bundle. The newer report-recovery package still needs installed PDF/restart checks. Physical-camera and iPhone checks remain incomplete.
 
 The October 9 browser recheck ran on web source `7de21caff4cf64f31f8ef9f90581baac18963a4f`. Native recovery source is committed through `0d796f57a3ff1f790c677c9d5a25530f0cb76156`, with subsequent build corrections through `6d4e99e1de9cbc6d9ed67bb92e525ec4e9107974`. The anatomy preprocessing correction is committed as `3c8a4817ce36ad09fe0cefa5ffb6d70fdd8180d7`; its release evidence is `2fa35d7af97239a7726ea68d2cbcdf6ee968c7dd`. Checks and remaining runtime coverage are recorded below. Earlier implementation commits in the existing [public Stoma3D repository](https://github.com/rohit47108/stoma3d) include:
 
@@ -299,7 +301,7 @@ The [October 9 browser photo-recovery record](BROWSER_PHOTO_RECOVERY_2026-10-09.
 - Exercise the remaining negative image cases, network and signature failures, and retry paths beyond the recorded retained-photo retry
 - Check encrypted saved data, deletion, interrupted captures, and migrated records against dedicated test data
 - Complete native upload, results, map, report, and restart journeys, keeping emulator checks separate from physical-camera checks
-- Complete ten consecutive end-to-end flows per platform; no completed series is recorded here
+- Complete ten consecutive native end-to-end flows per platform; the October 10 record verifies the browser upload series
 - Test real front and back cameras, focus, permissions, interruption, and iPhone HEIC uploads on physical phones
 - Check screen readers, large text, reduced motion, and required browser/device coverage beyond the recorded focus, map keyboard, and phone-width checks
 - Produce the installable iPhone build after Expo login and Apple signing setup
