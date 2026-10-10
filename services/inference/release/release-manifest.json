@@ -1,8 +1,8 @@
 {
   "schemaVersion": "1.1",
-  "releaseId": "stoma3d-segmentation-release-2026-07-28",
-  "createdAt": "2026-07-28T08:51:23Z",
-  "codeRevision": "61d327c1c14bfb6b9353ba0d417ca6e018e4c06b91fa918a6a1e30ecdb9d62bb",
+  "releaseId": "stoma3d-anatomy-resize-release-2026-10-09",
+  "createdAt": "2026-10-10T01:22:00Z",
+  "codeRevision": "3c8a4817ce36ad09fe0cefa5ffb6d70fdd8180d7",
   "heads": [
     {
       "head": "segmentation",
@@ -26,22 +26,25 @@
     {
       "head": "anatomy",
       "enabled": true,
-      "version": "smart-om-mobilenetv3-2026.07.27",
+      "version": "smart-om-mobilenetv3-pillow-2026.10.09",
       "artifactPath": "anatomy.onnx",
       "artifactFormat": "onnx",
       "artifactSha256": "335cacfa5ceab8d32d6b903c65d482c246ac6ac2a7e7a831f6ede27d62a553a9",
-      "evaluatedAt": "2026-07-27T21:46:04.790222Z",
+      "evaluatedAt": "2026-10-10T01:13:34.035313Z",
       "metrics": {
         "accuracy": 0.9840425531914894,
         "macro_f1": 0.9841741469632312,
         "minimum_region_recall": 0.9302325581395349,
-        "expected_calibration_error": 0.012301731379108227,
+        "expected_calibration_error": 0.006272587631151686,
+        "accepted_fraction": 0.9787234042553191,
+        "accepted_accuracy": 0.9918478260869565,
+        "correct_accepted_fraction": 0.9707446808510638,
         "test_patient_count": 47,
         "test_sample_count": 376
       },
       "unmetRequirements": [],
       "reviewerApproved": true,
-      "reviewEvidence": "anatomy-engineering-review.md",
+      "reviewEvidence": "anatomy-preprocessing-review-2026-10-09.md",
       "interface": {
         "inputName": "image",
         "outputName": "logits",
@@ -52,7 +55,7 @@
         "inputHeight": 224,
         "pixelScale": "zero_to_one",
         "resizeMode": "stretch",
-        "resizeInterpolation": "linear",
+        "resizeInterpolation": "pillow_bilinear",
         "normalizationMean": [0.485, 0.456, 0.406],
         "normalizationStd": [0.229, 0.224, 0.225],
         "outputKind": "class_logits",

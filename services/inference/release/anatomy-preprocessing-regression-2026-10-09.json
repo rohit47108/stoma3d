@@ -1,0 +1,137 @@
+{
+  "abstention_threshold": 0.77,
+  "artifact_sha256": "335cacfa5ceab8d32d6b903c65d482c246ac6ac2a7e7a831f6ede27d62a553a9",
+  "calibration_temperature": 0.5038993705269597,
+  "dataset_manifest_sha256": "4ff735f5f667c716dd4524a537e4efd48f2ff826f5d0c78abc460bcc9f3cee96",
+  "disclaimer": "Engineering regression evidence only; not clinical validity or diagnosis.",
+  "evaluated_at": "2026-10-10T01:13:34.035313+00:00",
+  "evaluation_role": "Regression recheck of existing held-out split, not a new independent study",
+  "mpo_sources_reencoded": 6,
+  "patient_disjoint": true,
+  "pipeline": "Pillow: first frame, EXIF orientation, RGB, max1600 LANCZOS, JPEG84; backend sanitize_image; declared 224x224 normalization; frozen ONNX weights",
+  "pipeline_limitation": "Client-style preparation uses Pillow, not byte-identical browser canvas or native capture. Six source MPO images use their first frame as in training; only single-frame JPEGs enter sanitize_image.",
+  "results": {
+    "linear": {
+      "accepted_accuracy": 0.9945054945054945,
+      "accepted_fraction": 0.9680851063829787,
+      "accuracy": 0.9867021276595744,
+      "correct_accepted_fraction": 0.9627659574468085,
+      "expected_calibration_error": 0.012277238293410996,
+      "macro_f1": 0.9867578984550957,
+      "per_class_f1": {
+        "dorsal_tongue": 0.99009900990099,
+        "left_buccal_mucosa": 0.9894736842105264,
+        "lower_dental_arch": 1.0,
+        "lower_lip": 0.9807692307692307,
+        "right_buccal_mucosa": 0.9803921568627451,
+        "upper_dental_arch": 1.0,
+        "upper_lip": 0.963855421686747,
+        "ventral_tongue": 0.9894736842105264
+      },
+      "per_class_precision": {
+        "dorsal_tongue": 0.9803921568627451,
+        "left_buccal_mucosa": 0.9791666666666666,
+        "lower_dental_arch": 1.0,
+        "lower_lip": 0.9807692307692307,
+        "right_buccal_mucosa": 0.9615384615384616,
+        "upper_dental_arch": 1.0,
+        "upper_lip": 1.0,
+        "ventral_tongue": 1.0
+      },
+      "per_class_recall": {
+        "dorsal_tongue": 1.0,
+        "left_buccal_mucosa": 1.0,
+        "lower_dental_arch": 1.0,
+        "lower_lip": 0.9807692307692307,
+        "right_buccal_mucosa": 1.0,
+        "upper_dental_arch": 1.0,
+        "upper_lip": 0.9302325581395349,
+        "ventral_tongue": 0.9791666666666666
+      },
+      "per_class_specificity": {
+        "dorsal_tongue": 0.9969325153374233,
+        "left_buccal_mucosa": 0.9969604863221885,
+        "lower_dental_arch": 1.0,
+        "lower_lip": 0.9969135802469136,
+        "right_buccal_mucosa": 0.9938650306748467,
+        "upper_dental_arch": 1.0,
+        "upper_lip": 1.0,
+        "ventral_tongue": 1.0
+      },
+      "per_class_support": {
+        "dorsal_tongue": 50,
+        "left_buccal_mucosa": 47,
+        "lower_dental_arch": 44,
+        "lower_lip": 52,
+        "right_buccal_mucosa": 50,
+        "upper_dental_arch": 42,
+        "upper_lip": 43,
+        "ventral_tongue": 48
+      },
+      "sample_count": 376
+    },
+    "pillow_bilinear": {
+      "accepted_accuracy": 0.9918478260869565,
+      "accepted_fraction": 0.9787234042553191,
+      "accuracy": 0.9840425531914894,
+      "correct_accepted_fraction": 0.9707446808510638,
+      "expected_calibration_error": 0.006272587631151686,
+      "macro_f1": 0.9841741469632312,
+      "per_class_f1": {
+        "dorsal_tongue": 1.0,
+        "left_buccal_mucosa": 0.968421052631579,
+        "lower_dental_arch": 1.0,
+        "lower_lip": 0.9807692307692307,
+        "right_buccal_mucosa": 0.970873786407767,
+        "upper_dental_arch": 1.0,
+        "upper_lip": 0.963855421686747,
+        "ventral_tongue": 0.9894736842105264
+      },
+      "per_class_precision": {
+        "dorsal_tongue": 1.0,
+        "left_buccal_mucosa": 0.9583333333333334,
+        "lower_dental_arch": 1.0,
+        "lower_lip": 0.9807692307692307,
+        "right_buccal_mucosa": 0.9433962264150944,
+        "upper_dental_arch": 1.0,
+        "upper_lip": 1.0,
+        "ventral_tongue": 1.0
+      },
+      "per_class_recall": {
+        "dorsal_tongue": 1.0,
+        "left_buccal_mucosa": 0.9787234042553191,
+        "lower_dental_arch": 1.0,
+        "lower_lip": 0.9807692307692307,
+        "right_buccal_mucosa": 1.0,
+        "upper_dental_arch": 1.0,
+        "upper_lip": 0.9302325581395349,
+        "ventral_tongue": 0.9791666666666666
+      },
+      "per_class_specificity": {
+        "dorsal_tongue": 1.0,
+        "left_buccal_mucosa": 0.993920972644377,
+        "lower_dental_arch": 1.0,
+        "lower_lip": 0.9969135802469136,
+        "right_buccal_mucosa": 0.99079754601227,
+        "upper_dental_arch": 1.0,
+        "upper_lip": 1.0,
+        "ventral_tongue": 1.0
+      },
+      "per_class_support": {
+        "dorsal_tongue": 50,
+        "left_buccal_mucosa": 47,
+        "lower_dental_arch": 44,
+        "lower_lip": 52,
+        "right_buccal_mucosa": 50,
+        "upper_dental_arch": 42,
+        "upper_lip": 43,
+        "ventral_tongue": 48
+      },
+      "sample_count": 376
+    }
+  },
+  "source_commit": "7de21caff4cf64f31f8ef9f90581baac18963a4f",
+  "test_patient_count": 47,
+  "test_sample_count": 376,
+  "uncommitted_change": "Explicit Pillow bilinear adapter mode and matching training metadata"
+}
