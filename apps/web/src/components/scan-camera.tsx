@@ -32,6 +32,8 @@ export function ScanCamera({
   const startupRef = useRef<AbortController | null>(null);
   const preparationRef = useRef<AbortController | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const primaryActionRef = useRef<HTMLButtonElement>(null);
+  const focusAfterCancelRef = useRef(false);
   const [facing, setFacing] = useState<"user" | "environment">(initialFacing);
   const [cameraState, setCameraState] = useState<
     "closed" | "opening" | "open" | "error"
@@ -64,6 +66,13 @@ export function ScanCamera({
       document.removeEventListener("visibilitychange", interrupted);
     };
   }, [stop]);
+
+  useEffect(() => {
+    if (!busy && cameraState === "closed" && focusAfterCancelRef.current) {
+      focusAfterCancelRef.current = false;
+      primaryActionRef.current?.focus();
+    }
+  }, [busy, cameraState]);
 
   async function openCamera(nextFacing = facing) {
     stop();
@@ -201,6 +210,12 @@ export function ScanCamera({
     }
   }
 
+  const preparationStatus = busy
+    ? "Preparing photo…"
+    : cameraState === "opening"
+      ? "Opening camera…"
+      : "";
+
   return (
     <div className="scan-camera">
       <div className="scan-camera-preview">
@@ -217,11 +232,7 @@ export function ScanCamera({
             <span aria-hidden="true" className="scan-camera-symbol">
               ◎
             </span>
-            <p>
-              {cameraState === "opening"
-                ? "Opening camera…"
-                : "Frame just the mouth"}
-            </p>
+            <p>{preparationStatus || "Frame just the mouth"}</p>
             <small>
               {cameraMessage ||
                 "Use even lighting and keep the tissue in focus."}
@@ -243,6 +254,7 @@ export function ScanCamera({
       <div className="scan-camera-actions">
         {cameraState === "open" ? (
           <button
+            ref={primaryActionRef}
             type="button"
             className="scan-button scan-button-primary scan-shutter"
             disabled={busy}
@@ -252,12 +264,13 @@ export function ScanCamera({
           </button>
         ) : (
           <button
+            ref={primaryActionRef}
             type="button"
             className="scan-button scan-button-primary"
             disabled={cameraState === "opening" || busy}
             onClick={() => void openCamera()}
           >
-            {cameraState === "opening" ? "Opening camera…" : "Open camera"}
+            {preparationStatus || "Open camera"}
           </button>
         )}
         <button
@@ -273,12 +286,14 @@ export function ScanCamera({
         >
           Choose a photo
         </button>
-        {cameraState === "opening" && (
+        {(cameraState === "opening" || busy) && (
           <button
             type="button"
             className="scan-button"
             onClick={() => {
+              focusAfterCancelRef.current = true;
               stop();
+              setBusy(false);
               setCameraState("closed");
               setCameraMessage("");
             }}
@@ -305,9 +320,16 @@ export function ScanCamera({
           accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.heic,.heif"
           className="sr-only"
           aria-label="Choose a mouth photo"
+          disabled={busy}
+          tabIndex={-1}
           onChange={(event) => void upload(event.target.files?.[0])}
         />
       </div>
+      {/* Keep the polite live region mounted before asynchronous work starts.
+          https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role */}
+      <p role="status" className="sr-only">
+        {preparationStatus}
+      </p>
     </div>
   );
 }

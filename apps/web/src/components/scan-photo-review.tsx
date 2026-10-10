@@ -203,7 +203,7 @@ export function ScanPhotoReview({
       </label>
       {(problem || localProblem) && (
         <p role="alert" className="scan-error">
-          {problem || localProblem}
+          {localProblem || problem}
         </p>
       )}
       {problem && regionCorrection && (
@@ -226,13 +226,18 @@ export function ScanPhotoReview({
           type="button"
           className="scan-button scan-button-primary"
           disabled={!confirmed || busy || editing}
-          onClick={onUse}
+          onClick={() => {
+            setLocalProblem(null);
+            onUse();
+          }}
         >
-          {busy
-            ? "Checking photo…"
-            : problem
-              ? "Try this photo again"
-              : "Use photo"}
+          {editing
+            ? "Updating photo…"
+            : busy
+              ? "Checking photo…"
+              : problem
+                ? "Try this photo again"
+                : "Use photo"}
         </button>
         <button
           type="button"
@@ -243,12 +248,15 @@ export function ScanPhotoReview({
           Choose another
         </button>
       </div>
-      {busy && (
-        <p role="status" className="scan-help">
-          Checking privacy, image quality, and the selected region. Your photo
-          stays here if you need to retry.
-        </p>
-      )}
+      {/* Keep the live region mounted while idle so preparation updates can be announced.
+          https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role */}
+      <p role="status" className={busy || editing ? "scan-help" : "sr-only"}>
+        {editing
+          ? "Updating photo…"
+          : busy
+            ? "Checking privacy, image quality, and the selected region. Your photo stays here if you need to retry."
+            : ""}
+      </p>
     </div>
   );
 }

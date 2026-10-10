@@ -1,4 +1,5 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decodePhoto,
@@ -12,10 +13,18 @@ import { ScanPhotoReview } from "./scan-photo-review";
 const hooks = vi.hoisted(() => ({
   cleanups: [] as (() => void)[],
   stateUpdates: vi.fn(),
+  stateCursor: 0,
+  stateValues: new Map<number, unknown>(),
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
-  useState: (initial: unknown) => [initial, hooks.stateUpdates],
+  useState: (initial: unknown) => {
+    const slot = hooks.stateCursor++;
+    return [
+      hooks.stateValues.has(slot) ? hooks.stateValues.get(slot) : initial,
+      hooks.stateUpdates,
+    ];
+  },
   useRef: (initial: unknown) => ({ current: initial }),
   useEffect: (setup: () => (() => void) | void) => {
     const cleanup = setup();
@@ -58,6 +67,7 @@ function findButton(
 function renderReview(
   overrides: Partial<Parameters<typeof ScanPhotoReview>[0]> = {},
 ) {
+  hooks.stateCursor = 0;
   const photo: PreparedPhoto = {
     image: "data:image/jpeg;base64,cGhvdG8=",
     blob: new Blob(["photo"], { type: "image/jpeg" }),
@@ -84,6 +94,8 @@ const finishMicrotasks = () =>
 beforeEach(() => {
   vi.clearAllMocks();
   hooks.cleanups.length = 0;
+  hooks.stateCursor = 0;
+  hooks.stateValues.clear();
   vi.mocked(decodePhoto).mockResolvedValue({
     naturalWidth: 640,
     naturalHeight: 480,
@@ -91,6 +103,65 @@ beforeEach(() => {
 });
 
 describe("photo edit lifecycle", () => {
+  it.each([
+    { previousError: null, label: "Use photo" },
+    {
+      previousError: "This photo is too blurry.",
+      label: "Try this photo again",
+    },
+  ])(
+    "clears the edit error before $label starts a new analysis",
+    ({ previousError, label }) => {
+      const editError = "The edit could not be applied. Try again.";
+      const analysisError = "The privacy check could not run. Try again.";
+      hooks.stateValues.set(0, true);
+      hooks.stateValues.set(6, editError);
+      const onUse = vi.fn();
+      const review = renderReview({ problem: previousError, onUse });
+
+      findButton(review.tree, label)!.props.onClick();
+
+      expect(hooks.stateUpdates).toHaveBeenCalledWith(null);
+      expect(onUse).toHaveBeenCalledOnce();
+      expect(hooks.stateUpdates.mock.invocationCallOrder[0]).toBeLessThan(
+        onUse.mock.invocationCallOrder[0],
+      );
+      // Emulate that committed state update before a later service error arrives.
+      hooks.stateValues.set(6, null);
+      const html = renderToStaticMarkup(
+        renderReview({ problem: analysisError }).tree,
+      );
+      expect(html).toContain(analysisError);
+      expect(html).not.toContain(editError);
+    },
+  );
+
+  it("shows a newer edit error instead of the previous analysis error", () => {
+    hooks.stateValues.set(6, "The edit could not be applied. Try again.");
+    const review = renderReview({ problem: "This photo is too blurry." });
+    const html = renderToStaticMarkup(review.tree);
+
+    expect(html).toContain(
+      '<p role="alert" class="scan-error">The edit could not be applied. Try again.</p>',
+    );
+    expect(html).not.toContain("This photo is too blurry.");
+  });
+
+  it("announces photo editing while disabling photo submission", () => {
+    hooks.stateValues.set(1, true);
+    const html = renderToStaticMarkup(renderReview().tree);
+
+    expect(html).toContain('role="status"');
+    expect(html).toContain("Updating photo…");
+    expect(html).toMatch(/disabled="">Updating photo…<\/button>/);
+  });
+
+  it("keeps an empty status region mounted before preparation starts", () => {
+    const html = renderToStaticMarkup(renderReview().tree);
+    expect(html).toContain('<p role="status" class="sr-only"></p>');
+    expect(html).not.toContain("Updating photo…");
+  });
+
   it("does not replace a newer photo when an abandoned edit finishes", async () => {
     const preparation = deferred<PreparedPhoto>();
     vi.mocked(prepareCanvasPhoto).mockReturnValue(preparation.promise);
