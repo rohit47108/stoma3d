@@ -2,6 +2,14 @@
 
 All notable Stoma3D source-release changes are recorded here.
 
+## Unreleased
+
+### Fixed
+
+- Android photo selection no longer shows a false "photo cleared" warning when
+  the system picker returns or is canceled. A newly prepared photo clears an
+  older interruption warning without bypassing review or temporary-file cleanup.
+
 ## 0.1.0 - 2026-08-13
 
 ### Added

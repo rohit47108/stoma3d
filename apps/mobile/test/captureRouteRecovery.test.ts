@@ -534,6 +534,80 @@ afterEach(() => {
 });
 
 describe("native capture recovery wiring", () => {
+  it.each(["selected", "canceled"])(
+    "does not report a cleared photo when an empty Android picker is %s",
+    async (outcome) => {
+      const selection = deferred<{ uri: string } | null>();
+      runtime.picker.mockReturnValueOnce(selection.promise);
+      control("Choose photo").props.onPress!();
+      await settle();
+      appState("background");
+      appState("active");
+      selection.resolve(
+        outcome === "selected"
+          ? { uri: "file:///cache/ImagePicker/selected.jpg" }
+          : null,
+      );
+      await settle();
+      expect(previewUri()).toBe(outcome === "selected" ? photo.uri : undefined);
+      expect(
+        nodes(renderRoute()).some(
+          (node) =>
+            typeof node.props.children === "string" &&
+            node.props.children.startsWith("Photo cleared when you left"),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("clears a departure warning only after a replacement photo is ready", async () => {
+    await choosePhoto();
+    appState("background");
+    appState("active");
+    await settle();
+    const departureWarning = () =>
+      nodes(renderRoute()).some(
+        (node) =>
+          typeof node.props.children === "string" &&
+          node.props.children.startsWith("Photo cleared when you left"),
+      );
+    expect(departureWarning()).toBe(true);
+    const selection = deferred<{ uri: string }>();
+    runtime.picker.mockReturnValueOnce(selection.promise);
+    control("Choose photo").props.onPress!();
+    await settle();
+    appState("background");
+    appState("active");
+    selection.resolve({ uri: "file:///cache/ImagePicker/replacement.jpg" });
+    await settle();
+    expect(previewUri()).toBe(photo.uri);
+    expect(departureWarning()).toBe(false);
+    expect(control(/This shows .* only/).props.selected).toBe(false);
+    expect(control("Use photo").props.disabled).toBe(true);
+  });
+
+  it("reports an interrupted preparation after the Android picker has returned", async () => {
+    const prepared = deferred<SanitizedCapture>();
+    runtime.sanitize.mockReturnValueOnce(prepared.promise);
+    control("Choose photo").props.onPress!();
+    await settle();
+    expect(runtime.sanitize).toHaveBeenCalledOnce();
+    appState("background");
+    appState("active");
+    prepared.resolve(photo);
+    await settle();
+    expect(previewUri()).toBeUndefined();
+    expect(runtime.removeTemporary).toHaveBeenCalledWith(photo.uri);
+    expect(
+      nodes(renderRoute()).some(
+        (node) =>
+          typeof node.props.children === "string" &&
+          node.props.children.startsWith("Photo cleared when you left"),
+      ),
+    ).toBe(true);
+    expect(runtime.analyze).not.toHaveBeenCalled();
+  });
+
   it.each(["background", "blur"])(
     "restores the camera when %s cancels a switch between animation frames",
     async (departure) => {

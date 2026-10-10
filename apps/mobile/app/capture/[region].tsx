@@ -138,6 +138,7 @@ export default function CaptureRoute() {
   const priorRouteIdentity = useRef(routeIdentity);
   const actionBusy = useRef(false);
   const pickerInFlight = useRef(false);
+  const waitingForPicker = useRef(false);
   const pickerTemporaryLease = useRef<PickerTemporaryLease | null>(null);
   const draftRestoreStarted = useRef(false);
   const videoPlayer = useVideoPlayer(null);
@@ -226,7 +227,11 @@ export default function CaptureRoute() {
   }, []);
 
   const clearTemporaryReview = useCallback(() => {
-    const reviewCleared = hasReview.current || actionBusy.current;
+    // Android's selected-photo picker is a temporary background Activity, not
+    // an existing photo review being lost. Cleanup still runs in either case.
+    // https://reactnative.dev/docs/0.86/appstate#app-states
+    const reviewCleared =
+      hasReview.current || (actionBusy.current && !waitingForPicker.current);
     setCandidate(null);
     setSweepCandidates([]);
     setCropOpen(false);
@@ -686,6 +691,7 @@ export default function CaptureRoute() {
       throw cleanupError;
     }
     if (await discardIfStale()) return;
+    setError(null);
     setRejectedQuality(null);
     setRejectedGuidance(null);
     setSuggestedRegion(null);
@@ -926,6 +932,7 @@ export default function CaptureRoute() {
     const routeToken = lifecycle.current.routeToken();
     if (!lifecycle.current.isRouteCurrent(routeToken)) return;
     pickerInFlight.current = true;
+    waitingForPicker.current = true;
     setPickerPending(true);
     actionBusy.current = true;
     setBusy(true);
@@ -951,6 +958,7 @@ export default function CaptureRoute() {
       if (!lifecycle.current.isRouteCurrent(routeToken)) return;
       token = lifecycle.current.beginReviewAction();
       if (!lifecycle.current.isReviewCurrent(token)) return;
+      waitingForPicker.current = false;
       actionBusy.current = true;
       setBusy(true);
       setBusyLabel("Checking selected image...");
@@ -987,6 +995,7 @@ export default function CaptureRoute() {
         if (pickerTemporaryLease.current === lease)
           pickerTemporaryLease.current = null;
         pickerInFlight.current = false;
+        waitingForPicker.current = false;
         if (mounted.current) setPickerPending(false);
         if (
           token
