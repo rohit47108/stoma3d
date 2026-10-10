@@ -204,6 +204,14 @@ The corresponding website deployment `dpl_8Myw8HqYHYc9ogidUQCueyqhJMfZ` was READ
 
 The final root-environment notice regeneration retains all 648 prior legal texts, changing only reviewed package version references and the lock hash. These checks do not substitute for the pending physical-phone, installed-app, and repeated-flow coverage above.
 
+## October 9 direct browser PDF download
+
+Guest scans now offer a local PDF download separately from printing. Source `93fdb859e596f28da09df1af50aad3389181ba20` passed 644 JavaScript tests, full workspace TypeScript, web lint, formatting, dependency and repository audits, and the public-mode production build. The existing legal inventory retained all 648 prior texts and added four, with five newly locked packages.
+
+The deployed public URL preserved the existing 2/8 scan. Creating and downloading its report through the visible controls produced a reopenable three-page PDF containing both saved photos and their original analysis details. Every page was rendered and inspected. Keyboard access, 44-pixel control heights, no horizontal overflow at a narrow viewport, and reset of the prepared-report control after leaving the map were checked. This was a desktop browser check, not phone or native report coverage. No new image was uploaded and no scan was deleted.
+
+The [PDF export record](BROWSER_PDF_EXPORT_2026-10-09.md) contains the deployment, file hash, screenshots, dependency choice, and remaining limits. The inference service, contracts, encrypted storage, and native builds were unchanged by this web increment.
+
 ## Earlier Android emulator results
 
 The rebuilt Android application package (APK) used the production inference endpoint and current response-verification key. These checks ran on an emulator, not a physical phone:
@@ -285,7 +293,7 @@ Expo login remains incomplete; the owner chose to do it later. No installable iP
 
 Complete these checks before treating the approved usability plan as finished:
 
-- Check browser print dialogs, phone PDF saving, and native report generation separately from the verified CDP export
+- Check browser print dialogs, actual phone PDF saving, and native report generation separately from the verified direct desktop download and earlier CDP export
 - Exercise the remaining negative image cases, network and signature failures, and retry paths beyond the recorded retained-photo retry
 - Check encrypted saved data, deletion, interrupted captures, and migrated records against dedicated test data
 - Complete native upload, results, map, report, and restart journeys, keeping emulator checks separate from physical-camera checks
