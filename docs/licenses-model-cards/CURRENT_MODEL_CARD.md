@@ -1,6 +1,6 @@
 # Stoma3D current model release state
 
-Last updated: 2026-08-26
+Last updated: 2026-10-09
 Threshold version: `2026.1`
 
 > **This result is not a diagnosis.** A passed engineering release gate does
@@ -21,10 +21,23 @@ versions, hashes, enabled heads, limitations, and gate state.
 
 Anatomy:
 
-- Version `smart-om-mobilenetv3-2026.07.27`; SHA-256
+- Version `smart-om-mobilenetv3-pillow-2026.10.09`; SHA-256
   `335cacfa5ceab8d32d6b903c65d482c246ac6ac2a7e7a831f6ede27d62a553a9`.
 - Confirms or rejects whether a photo matches the selected one of eight mouth
   regions.
+- The October 9 release corrects preprocessing to match training's Pillow
+  bilinear resize. Weights, calibration temperature, and the 0.77 confidence
+  cutoff are unchanged. Segmentation still uses its original OpenCV resize.
+- The existing 376-image, 47-patient holdout was rechecked with client-style
+  JPEG preparation: macro F1 0.984174, lowest region recall 0.930233, and
+  calibration error 0.006273. This is a regression recheck, not a fresh study;
+  the table above preserves the original locked results. Accepted correct
+  images increased from 362 to 365, while accepted incorrect images increased
+  from two to three. Overall accuracy did not improve.
+- The staged and promoted service returned signed real results for a previously
+  rejected licensed tongue-underside image. The public browser saved it, showed
+  the new anatomy version, and connected it to the selected map region. Wrong
+  region, severe-blur, and dark controls remained rejected.
 
 Segmentation:
 
@@ -63,6 +76,8 @@ claims, or care guidance.
 - `ANATOMY_RELEASE_REVIEW.md`
 - `SEGMENTATION_RELEASE_REVIEW.md`
 - `services/inference/release/locked-test-anatomy-evaluation.json`
+- `services/inference/release/anatomy-preprocessing-regression-2026-10-09.json`
+- `services/inference/release/anatomy-preprocessing-review-2026-10-09.md`
 - `services/inference/release/locked-test-segmentation-evaluation.json`
 
 The service fails closed. A missing file, changed hash, invalid tensor contract,

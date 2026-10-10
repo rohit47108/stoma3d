@@ -1,6 +1,6 @@
 # Stoma3D deployment handoff
 
-Last reviewed: 2026-10-01
+Last reviewed: 2026-10-09
 
 This guide covers account-free scans, signed inference, native builds, and the
 optional hosted account services. It separates source, build, deployment, and
@@ -11,14 +11,14 @@ Stoma3D product name does not change the existing checkout path.
 
 ## Deployment state
 
-| Surface               | Current evidence                                                                                                                                                                                                                                                                             | Deployment status                                                                                           |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Inference API         | October 1 deployment includes the private models and YuNet detector. Health reports `analysisReady: true`, `privacyReady: true`, signing enabled, release ID `stoma3d-segmentation-release-2026-07-28`, and anatomy/segmentation heads. Real browser uploads returned verified live results. | Current inference changes are deployed and checked                                                          |
-| Current web app       | `/scan` guest workspace, camera/upload, encrypted browser records, results, map, and print report are implemented. Local browser tests used the deployed analysis service.                                                                                                                   | New usability code has not yet been deployed to the web production alias                                    |
-| Stateful platform API | Container, migrations, OIDC validation, PostgreSQL, private object storage, consent, sync, sharing, reports, audit, retention, and deletion paths are in the repository                                                                                                                      | No production deployment has been verified                                                                  |
-| Durable worker        | Container, Redis consumer, artifact rendering, report/video/export/deletion processors, retry, heartbeat, and cleanup paths are in the repository                                                                                                                                            | No production deployment has been verified                                                                  |
-| Mobile app            | Android ARM64 release APK built locally with the production inference URL and current signing-key pin. iOS JavaScript export passed.                                                                                                                                                         | Physical-device checks remain pending. No installable `.ipa` exists; Expo login was postponed by the owner. |
-| Full product          | The mobile, web, platform, worker, and inference pieces exist as separate deployable surfaces                                                                                                                                                                                                | Not yet proven end to end in one production environment                                                     |
+| Surface               | Current evidence                                                                                                                                                                                                                                                                                        | Deployment status                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Inference API         | October 9 deployment includes the unchanged private models and YuNet detector with training-matched anatomy resizing. Health reports ready anatomy/segmentation, required signing, no fixtures, and release `stoma3d-anatomy-resize-release-2026-10-09`. Signed real-image and rejection checks passed. | Deployed and checked; physical-camera coverage remains separate                                                                          |
+| Current web app       | Production `/scan` supports guest camera/upload, encrypted records, results, map, and print report. Earlier full eight-region upload scans and October 9 retained-record/live-retry checks passed.                                                                                                      | Usability code is deployed; remaining browser and phone checks are listed in the verification record                                     |
+| Stateful platform API | Container, migrations, OIDC validation, PostgreSQL, private object storage, consent, sync, sharing, reports, audit, retention, and deletion paths are in the repository                                                                                                                                 | No production deployment has been verified                                                                                               |
+| Durable worker        | Container, Redis consumer, artifact rendering, report/video/export/deletion processors, retry, heartbeat, and cleanup paths are in the repository                                                                                                                                                       | No production deployment has been verified                                                                                               |
+| Mobile app            | October 9 Android ARM64 and x86_64 test APKs built and passed package-signature/configuration checks. iOS JavaScript export passed.                                                                                                                                                                     | New packages still need install/runtime and physical-device checks. No installable `.ipa` exists; Expo login was postponed by the owner. |
+| Full product          | The mobile, web, platform, worker, and inference pieces exist as separate deployable surfaces                                                                                                                                                                                                           | Not yet proven end to end in one production environment                                                                                  |
 
 The [October verification record](release/USABILITY_VERIFICATION_2026-10-01.md)
 lists the current test evidence. A working inference deployment does not prove
@@ -388,10 +388,22 @@ Keep private artifacts ignored by Git while including them in the intentional
 inference upload. Do not copy them into the web app or public download artifacts.
 Deploy from the existing checkout with an explicit inference project:
 
+Run from the repository root, not `services/inference`. The project already has
+`services/inference` configured as its root directory. Always specify the project
+and the service config; automatic link discovery can otherwise select the web
+project or apply the service directory twice.
+
 ```powershell
-pnpm dlx vercel@62.0.0 deploy --prod --yes `
-  --project stoma3d-inference --scope rohit-singhs-projects-48f82479
+pnpm dlx vercel@63.1.0 deploy --prod --skip-domain --yes `
+  --project prj_J7jpyOqiGvRaEnGYZcyXB4MTcS2j `
+  --local-config services/inference/vercel.json `
+  --scope rohit-singhs-projects-48f82479
 ```
+
+Test the staged build's exact URL and public signing key before promoting that
+deployment ID with `vercel promote`. The website's root project link stays
+unchanged. Do not enable Git-only inference releases without supplying the private
+bundle.
 
 After replacement, check `/api/healthz` for `privacyReady: true`,
 `analysisReady: true`, required signing, and no readiness reasons. Verify the
@@ -399,10 +411,16 @@ signed model card, then submit a licensed mouth-only image through the browser
 relay. A deployment that loads its models but cannot initialize YuNet is not
 ready for photo analysis.
 
-The October 1 inference deployment is `dpl_2byfoVn6jBcH3QTmoZykHYAL4mqk`.
+The October 9 inference deployment is `dpl_JCfM326iqVnnvCwEHiRTwiLwH5r4`,
+built from adapter source `3c8a4817ce36ad09fe0cefa5ffb6d70fdd8180d7` and release
+evidence `2fa35d7af97239a7726ea68d2cbcdf6ee968c7dd`. It was staged, checked,
+then promoted without rebuilding. The previous deployment
+`dpl_2byfoVn6jBcH3QTmoZykHYAL4mqk` remains available for rollback.
 Its production alias is [the inference health endpoint](https://stoma3d-inference.vercel.app/api/healthz).
-The web production alias still needs the new usability release and deployed
-guest-flow verification.
+Signed health, model-card, live analysis, wrong-region, severe-blur, and dark
+checks passed on both the immutable build and the production alias. The same
+previously rejected licensed input also saved successfully through the public
+browser relay. Detailed coverage is in the October verification record.
 
 Vercel's current FastAPI runtime turns the service into one Function and applies
 Function limits, including request size, duration, memory, and bundle size. Run

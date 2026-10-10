@@ -2,7 +2,7 @@
 
 Snapshot started: 2026-10-01. Updated: 2026-10-09. This record covers the approved usability and reliability plan in `C:\Users\rohit\Projects\oralsight`. It records completed software checks, real-image results, deployments, and remaining checks separately. It is not a completed release sign-off.
 
-The previously deployed web source commit is `472d7a3260b59e17f532c8c7517c07180a6b3211`. Native recovery source is now committed through `0d796f57a3ff1f790c677c9d5a25530f0cb76156`; its checks and remaining runtime coverage are recorded below. Earlier implementation commits in the existing [public Stoma3D repository](https://github.com/rohit47108/stoma3d) include:
+The October 9 browser recheck ran on web source `7de21caff4cf64f31f8ef9f90581baac18963a4f`. Native recovery source is committed through `0d796f57a3ff1f790c677c9d5a25530f0cb76156`, with subsequent build corrections through `6d4e99e1de9cbc6d9ed67bb92e525ec4e9107974`. The anatomy preprocessing correction is committed as `3c8a4817ce36ad09fe0cefa5ffb6d70fdd8180d7`; its release evidence is `2fa35d7af97239a7726ea68d2cbcdf6ee968c7dd`. Checks and remaining runtime coverage are recorded below. Earlier implementation commits in the existing [public Stoma3D repository](https://github.com/rohit47108/stoma3d) include:
 
 - `a7ac64c`: Fix capture quality and deployed privacy checks
 - `2a462e1`: Simplify mobile scanning and protect photo recovery
@@ -128,13 +128,27 @@ The screenshot is `outputs/usability-checks/web-deletion-empty-history-2026-10-0
 
 The fresh scan created after the approved October 5 deletion reopened at 1/8 on the production website. Continue scan opened the next unfinished region, the underside of the tongue.
 
-A different licensed underside-of-tongue image reached the live analysis service but was rejected by anatomy validation: “This photo could not be matched to the selected mouth region. Try a closer, well-lit view.” The review photo remained available with retry and replacement actions, and saved coverage remained 1/8. This is an observed usable-image rejection that still needs model investigation; it is not recorded as a successful second region or as proof that the image was anatomically wrong. No acceptance gate was lowered and no substitute result was supplied.
+A different licensed underside-of-tongue image initially reached the live analysis service but was rejected by anatomy validation: “This photo could not be matched to the selected mouth region. Try a closer, well-lit view.” The review photo remained available with retry and replacement actions, and saved coverage remained 1/8. This was an observed usable-image rejection, not proof that the image was anatomically wrong. The investigation and successful correction are recorded below. No acceptance gate was lowered and no substitute result was supplied.
 
 The screenshot is `outputs/usability-checks/web-region-retry-2026-10-09.jpg`. The newer scan was not deleted under the earlier three-record deletion approval.
 
 Reopening Home and selecting Explore 3D map rendered the partial map at 1/8, with the saved tongue-top result and the remaining seven regions available. The screenshot is `outputs/usability-checks/web-partial-map-2026-10-09.png`. This verifies reopening the existing partial record, not a new completed scan.
 
-A local diagnostic using the hash-validated anatomy artifact predicted ventral tongue for the same source image, but with confidence approximately 0.582, below the release bundle's fixed 0.77 abstention threshold. It therefore abstained. The local anatomy artifact hash and version matched the deployed model card. This diagnostic used the backend's sanitized source pixels, not an exported copy of the browser's review image. The observed rejection is consistent with region-model uncertainty; improving acceptance still requires measured model/preprocessing work, not removal of the gate.
+A local diagnostic using the hash-validated anatomy artifact predicted ventral tongue for the same source image, but with confidence approximately 0.582, below the release bundle's fixed 0.77 abstention threshold. It therefore abstained. The local anatomy artifact hash and version matched the deployed model card. This diagnostic used the backend's sanitized source pixels, not an exported copy of the browser's review image.
+
+### October 9 anatomy preprocessing correction
+
+Investigation found that training/evaluation used antialiased Pillow bilinear resizing, while the deployed anatomy adapter used OpenCV linear resizing. With the same frozen weights and calibration, training-matched resizing gave the local input approximately 0.880 confidence. The fix adds an explicit release-declared resize mode; existing segmentation and legacy manifests keep OpenCV linear behavior. The 0.77 cutoff and all release gates remain unchanged.
+
+The existing patient-disjoint holdout was rechecked: 376 images from 47 patients across all eight regions. The corrected preparation retained macro F1 0.984174 and minimum region recall 0.930233. Correct accepted images increased from 362 to 365, but incorrect accepted images also increased from two to three; overall accuracy did not improve. This is a preprocessing-consistency correction and regression recheck, not a new independent study or clinical validation. The [engineering review](../../services/inference/release/anatomy-preprocessing-review-2026-10-09.md) records the full evidence and client-preparation limits.
+
+The exact staged production build `dpl_JCfM326iqVnnvCwEHiRTwiLwH5r4` loaded both pinned model hashes and YuNet successfully. Signed health, model-card, and live-analysis bytes verified against the unchanged public key, and modified response bytes failed verification. The licensed clear input completed; a wrong-region submission was unsupported; severe-blur and dark controls abstained before model analysis and exposed no masks. These checks passed again on the production alias after promoting the same build without rebuilding. Release ID is `stoma3d-anatomy-resize-release-2026-10-09`; anatomy version is `smart-om-mobilenetv3-pillow-2026.10.09`. Segmentation version and weights are unchanged.
+
+The same previously rejected source photo was then uploaded through the public browser UI, not injected or replaced. It returned a live-model result at approximately 87% analysis confidence and saved the underside region, advancing the existing scan from 1/8 to 2/8. The result had no thresholded candidate area; it was not called normal or harmless. View on 3D map selected the correct region. Reload preserved both accepted photos; Recent observation reopened the new result, and the map still showed both regions as accepted. No observation pin was fabricated or added.
+
+Screenshots are `outputs/usability-checks/web-anatomy-correction-result-2026-10-09.png` and `outputs/usability-checks/web-anatomy-correction-map-2026-10-09.png`. The earlier partial-map recheck is `outputs/usability-checks/web-partial-map-published-2026-10-09.png`. Keep licensed-image screenshots outside Git. This verifies one corrected browser upload and persistence, not ten consecutive scans or physical-phone capture.
+
+An initial unaliased staging attempt selected the web project through automatic link discovery. It was not promoted and was removed. The correct service deployment used the repository root with an explicit inference project and service config. Both public URLs stayed on their previous releases until the tested inference build was promoted.
 
 ## October 9 native recovery source checks
 
@@ -149,7 +163,7 @@ Native source changes through `0d796f57a3ff1f790c677c9d5a25530f0cb76156` add:
 
 The final full JavaScript command passed 634 tests: scripts 24, shared contracts 33, web 178, and mobile 399. Full workspace TypeScript, Prettier, and `git diff --check` passed. Focused tests first reproduced the reset/readback and stale-sync failures before the fixes passed. Controlled native/storage/network boundaries exercise these overlaps; they do not prove physical-device behavior or undo already-sent requests.
 
-The unchanged Python code was rechecked on October 9: 343 tests passed, one PostgreSQL-dependent test was skipped, and Ruff lint/format passed. Web ESLint and the public-mode production build passed, with 34 generated routes. Shared schema generation, dependency checks, and license-notice verification also passed. No secrets, medical test images, environment files, or generated app packages are included in these source commits.
+The Python code was rechecked on October 9 after the anatomy correction: 348 tests passed, one PostgreSQL-dependent test was skipped, and Ruff lint/format passed. Web ESLint and the public-mode production build passed, with 34 generated routes. Shared schema generation, dependency checks, and license-notice verification also passed. No secrets, medical test images, environment files, or generated app packages are included in these source commits.
 
 The ignored local mobile environment still pointed at old inference and website hostnames. Its public values were corrected to `https://stoma3d-inference.vercel.app/api`, `https://stoma3d.vercel.app`, and `https://stoma3d.vercel.app/shared`. The inference value matches the checked-in preview and production profiles; the public response-verification key was unchanged. An October 9 health check confirmed live anatomy and segmentation readiness, privacy readiness, required response signing, and no demo fixtures. This does not establish clinical validity.
 
@@ -223,7 +237,7 @@ Web regressions cover report/result descriptor parity, bounded map zoom and rota
 
 ## Deployments and build artifacts
 
-The current web deployment `dpl_GKvU5XdMYsiUd4TjLyYUSAJ9Pyu6` is ready at [Stoma3D](https://stoma3d.vercel.app/scan). It contains source commit `472d7a3260b59e17f532c8c7517c07180a6b3211`. Its immutable deployment is [the concurrent-save Stoma3D web build](https://stoma3d-dn51imdj9-rohit-singhs-projects-48f82479.vercel.app). The October 5 concurrent-tab checks ran against this deployment.
+The October 9 web deployment `dpl_Ci7K9cN7ek7APtNSYjP96HinLmMd` was ready at [Stoma3D](https://stoma3d.vercel.app/scan) for the browser recheck and successful anatomy retry. It contains source commit `7de21caff4cf64f31f8ef9f90581baac18963a4f`; its immutable URL is [the October 9 Stoma3D web build](https://stoma3d-gkcjbiisd-rohit-singhs-projects-48f82479.vercel.app). Repository safety and TypeScript GitHub checks for that source completed successfully. The October 5 concurrent-tab checks used the preceding `472d7a3` deployment `dpl_GKvU5XdMYsiUd4TjLyYUSAJ9Pyu6`.
 
 That source passed 178 web tests across 29 files, web TypeScript, ESLint, Prettier, and the public-mode production build. Both [repository safety](https://github.com/rohit47108/stoma3d/actions/runs/37232110690) and [TypeScript](https://github.com/rohit47108/stoma3d/actions/runs/37232110828) GitHub workflows succeeded. These earlier web checks do not verify the newly committed native changes.
 
