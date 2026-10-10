@@ -293,6 +293,8 @@ Expo login remains incomplete; the owner chose to do it later. No installable iP
 
 Complete these checks before treating the approved usability plan as finished:
 
+The [October 9 browser photo-recovery record](BROWSER_PHOTO_RECOVERY_2026-10-09.md) adds bounded preparation and cleanup tests, plus local upload, crop, rotation, and resume checks. It does not replace the device checks below.
+
 - Check browser print dialogs, actual phone PDF saving, and native report generation separately from the verified direct desktop download and earlier CDP export
 - Exercise the remaining negative image cases, network and signature failures, and retry paths beyond the recorded retained-photo retry
 - Check encrypted saved data, deletion, interrupted captures, and migrated records against dedicated test data

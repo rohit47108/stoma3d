@@ -30,6 +30,7 @@ export function ScanCamera({
   const streamRef = useRef<MediaStream | null>(null);
   const requestRef = useRef({ sequence: 0 });
   const startupRef = useRef<AbortController | null>(null);
+  const preparationRef = useRef<AbortController | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const [facing, setFacing] = useState<"user" | "environment">(initialFacing);
   const [cameraState, setCameraState] = useState<
@@ -41,6 +42,8 @@ export function ScanCamera({
     requestRef.current.sequence++;
     startupRef.current?.abort();
     startupRef.current = null;
+    preparationRef.current?.abort();
+    preparationRef.current = null;
     if (streamRef.current) stopCameraStream(streamRef.current);
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -132,13 +135,23 @@ export function ScanCamera({
 
   async function takePhoto() {
     const video = videoRef.current;
-    if (!video || busy) return;
+    if (!video || busy || preparationRef.current) return;
     const requestId = ++requestRef.current.sequence;
     const isCurrent = () => requestId === requestRef.current.sequence;
+    const controller = new AbortController();
+    preparationRef.current = controller;
     setBusy(true);
     try {
       const photo = await prepareCurrentCameraPhoto(
-        () => prepareCanvasPhoto(video, video.videoWidth, video.videoHeight),
+        () =>
+          prepareCanvasPhoto(
+            video,
+            video.videoWidth,
+            video.videoHeight,
+            undefined,
+            0,
+            controller.signal,
+          ),
         isCurrent,
       );
       if (!photo) return;
@@ -154,20 +167,23 @@ export function ScanCamera({
           : "The photo could not be read. Try again.",
       );
     } finally {
+      if (preparationRef.current === controller) preparationRef.current = null;
       if (isCurrent()) setBusy(false);
     }
   }
 
   async function upload(file: File | undefined) {
-    if (!file || busy) return;
+    if (!file || busy || preparationRef.current) return;
     setBusy(true);
     stop();
     const requestId = requestRef.current.sequence;
     const isCurrent = () => requestId === requestRef.current.sequence;
+    const controller = new AbortController();
+    preparationRef.current = controller;
     setCameraState("closed");
     try {
       const photo = await prepareCurrentCameraPhoto(
-        () => preparePhotoFile(file),
+        () => preparePhotoFile(file, controller.signal),
         isCurrent,
       );
       if (!photo) return;
@@ -180,6 +196,7 @@ export function ScanCamera({
         error instanceof Error ? error.message : "Choose another photo.",
       );
     } finally {
+      if (preparationRef.current === controller) preparationRef.current = null;
       if (isCurrent()) setBusy(false);
     }
   }

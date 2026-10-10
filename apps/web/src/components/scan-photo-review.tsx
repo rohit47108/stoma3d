@@ -41,7 +41,7 @@ export function ScanPhotoReview({
   const top = (insetY * 2 * offsetY) / 100;
 
   useEffect(() => {
-    // Ignore asynchronous image work after navigation removes this review.
+    // Cancel asynchronous image work after navigation removes this review.
     // https://react.dev/reference/react/useEffect#fetching-data-with-effects
     return () => {
       editRef.current?.abort();
@@ -56,7 +56,7 @@ export function ScanPhotoReview({
     setEditing(true);
     setLocalProblem(null);
     try {
-      const image = await decodePhoto(photo.blob);
+      const image = await decodePhoto(photo.blob, controller.signal);
       if (controller.signal.aborted) return;
       const next = await prepareCanvasPhoto(
         image,
@@ -71,6 +71,7 @@ export function ScanPhotoReview({
             }
           : undefined,
         turns,
+        controller.signal,
       );
       if (controller.signal.aborted) return;
       onChange(next);

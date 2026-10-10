@@ -12,6 +12,66 @@ export interface PhotoCrop {
 }
 const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 1_750_000;
+const PHOTO_STEP_TIMEOUT_MS = 20_000;
+
+export class PhotoPreparationTimeoutError extends Error {
+  constructor() {
+    super("Preparing this photo took too long. Try again or choose another.");
+    this.name = "PhotoPreparationTimeoutError";
+  }
+}
+
+function waitForPhotoStep<T>(
+  start: (ready: (value: T) => void, fail: (error: unknown) => void) => void,
+  signal?: AbortSignal,
+  cancel?: () => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancelled);
+    };
+    const fail = (error: unknown) => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      try {
+        cancel?.();
+      } catch {
+        /* Cleanup must not hide the original failure. */
+      }
+      reject(error);
+    };
+    const ready = (value: T) => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      resolve(value);
+    };
+    const cancelled = () =>
+      fail(
+        signal?.reason ??
+          new DOMException("Photo preparation cancelled.", "AbortError"),
+      );
+    const timer = setTimeout(
+      () => fail(new PhotoPreparationTimeoutError()),
+      PHOTO_STEP_TIMEOUT_MS,
+    );
+    if (signal?.aborted) {
+      cancelled();
+      return;
+    }
+    // Browser decoding/encoding APIs do not accept AbortSignal themselves.
+    // https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal#implementing_an_abortable_api
+    signal?.addEventListener("abort", cancelled, { once: true });
+    try {
+      start(ready, fail);
+    } catch (error) {
+      fail(error);
+    }
+  });
+}
 
 export function preparedPhotoFromSaved(
   image: string,
@@ -57,29 +117,50 @@ export function fittedImageSize(width: number, height: number, maxSide = 1600) {
   };
 }
 
-function canvasBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
-  return new Promise((resolve, reject) =>
-    canvas.toBlob(
-      (blob) =>
-        blob
-          ? resolve(blob)
-          : reject(
-              new Error("The photo could not be prepared. Choose another."),
-            ),
-      "image/jpeg",
-      quality,
-    ),
+function canvasBlob(
+  canvas: HTMLCanvasElement,
+  quality: number,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  return waitForPhotoStep<Blob>(
+    (resolve, reject) =>
+      canvas.toBlob(
+        (blob) =>
+          blob
+            ? resolve(blob)
+            : reject(
+                new Error("The photo could not be prepared. Choose another."),
+              ),
+        "image/jpeg",
+        quality,
+      ),
+    signal,
   );
 }
 
-export function blobDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () =>
-      reject(new Error("The photo could not be read. Choose another."));
-    reader.readAsDataURL(blob);
-  });
+export async function blobDataUrl(
+  blob: Blob,
+  signal?: AbortSignal,
+): Promise<string> {
+  signal?.throwIfAborted();
+  const reader = new FileReader();
+  try {
+    return await waitForPhotoStep<string>(
+      (resolve, reject) => {
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () =>
+          reject(new Error("The photo could not be read. Choose another."));
+        reader.onabort = () =>
+          reject(new DOMException("Photo reading cancelled.", "AbortError"));
+        reader.readAsDataURL(blob);
+      },
+      signal,
+      () => reader.abort(),
+    );
+  } finally {
+    // https://developer.mozilla.org/en-US/docs/Web/API/FileReader/abort
+    reader.onload = reader.onerror = reader.onabort = null;
+  }
 }
 
 export async function prepareCanvasPhoto(
@@ -88,7 +169,9 @@ export async function prepareCanvasPhoto(
   sourceHeight: number,
   crop?: PhotoCrop,
   turns = 0,
+  signal?: AbortSignal,
 ): Promise<PreparedPhoto> {
+  signal?.throwIfAborted();
   const area = crop ?? { left: 0, top: 0, width: 1, height: 1 };
   const sx = Math.round(area.left * sourceWidth),
     sy = Math.round(area.top * sourceHeight);
@@ -108,59 +191,89 @@ export async function prepareCanvasPhoto(
   const canvas = document.createElement("canvas");
   canvas.width = fitted.width;
   canvas.height = fitted.height;
-  const context = canvas.getContext("2d", { alpha: false });
-  if (!context)
-    throw new Error("Photo processing is unavailable in this browser.");
-  context.fillStyle = "#fff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.translate(canvas.width / 2, canvas.height / 2);
-  context.rotate((turns * Math.PI) / 2);
-  context.drawImage(
-    source,
-    sx,
-    sy,
-    sw,
-    sh,
-    -(rotated ? fitted.height : fitted.width) / 2,
-    -(rotated ? fitted.width : fitted.height) / 2,
-    rotated ? fitted.height : fitted.width,
-    rotated ? fitted.width : fitted.height,
-  );
-  let blob = await canvasBlob(canvas, 0.84);
-  if (blob.size > MAX_UPLOAD_BYTES) blob = await canvasBlob(canvas, 0.62);
-  if (blob.size > MAX_UPLOAD_BYTES)
-    throw new Error(
-      "This photo is too large to send. Crop closer to the mouth.",
+  try {
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context)
+      throw new Error("Photo processing is unavailable in this browser.");
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate((turns * Math.PI) / 2);
+    context.drawImage(
+      source,
+      sx,
+      sy,
+      sw,
+      sh,
+      -(rotated ? fitted.height : fitted.width) / 2,
+      -(rotated ? fitted.width : fitted.height) / 2,
+      rotated ? fitted.height : fitted.width,
+      rotated ? fitted.width : fitted.height,
     );
-  return { ...fitted, blob, image: await blobDataUrl(blob) };
+    let blob = await canvasBlob(canvas, 0.84, signal);
+    if (blob.size > MAX_UPLOAD_BYTES)
+      blob = await canvasBlob(canvas, 0.62, signal);
+    if (blob.size > MAX_UPLOAD_BYTES)
+      throw new Error(
+        "This photo is too large to send. Crop closer to the mouth.",
+      );
+    return { ...fitted, blob, image: await blobDataUrl(blob, signal) };
+  } finally {
+    // Release temporary pixels, including after cancellation or a stalled callback.
+    canvas.width = canvas.height = 0;
+  }
 }
 
-export async function decodePhoto(blob: Blob): Promise<HTMLImageElement> {
+export async function decodePhoto(
+  blob: Blob,
+  signal?: AbortSignal,
+): Promise<HTMLImageElement> {
+  signal?.throwIfAborted();
   const url = URL.createObjectURL(blob);
+  let image: HTMLImageElement | undefined;
+  let decoded = false;
   try {
-    const image = new Image();
+    image = new Image();
     image.src = url;
     // A decode failure and a decoded image that is too large need different
     // recovery instructions. https://developer.mozilla.org/en-US/docs/Web/API/HTMLImageElement/decode
     try {
-      await image.decode();
-    } catch {
+      const pending = image;
+      await waitForPhotoStep<void>((resolve, reject) => {
+        void pending.decode().then(resolve, reject);
+      }, signal);
+    } catch (error) {
+      if (signal?.aborted || error instanceof PhotoPreparationTimeoutError)
+        throw error;
       throw new Error(
         "This browser could not read that photo. For HEIC photos, choose a JPEG copy or take a photo here.",
       );
     }
     if (image.naturalWidth * image.naturalHeight > 50_000_000)
       throw new Error("Choose a smaller photo.");
+    decoded = true;
     return image;
   } finally {
+    if (image && !decoded) image.src = "";
     URL.revokeObjectURL(url);
   }
 }
 
-export async function preparePhotoFile(file: File): Promise<PreparedPhoto> {
+export async function preparePhotoFile(
+  file: File,
+  signal?: AbortSignal,
+): Promise<PreparedPhoto> {
+  signal?.throwIfAborted();
   validatePhotoFile(file);
-  const image = await decodePhoto(file);
+  const image = await decodePhoto(file, signal);
   // Canvas re-encoding applies browser-decoded orientation and drops EXIF metadata.
   // https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob
-  return prepareCanvasPhoto(image, image.naturalWidth, image.naturalHeight);
+  return prepareCanvasPhoto(
+    image,
+    image.naturalWidth,
+    image.naturalHeight,
+    undefined,
+    0,
+    signal,
+  );
 }
