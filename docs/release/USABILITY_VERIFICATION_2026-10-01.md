@@ -198,7 +198,11 @@ The final local full Python run passed 349 tests, with one PostgreSQL-only skip 
 
 A timing-sensitive worker test failed once in the first full run and passed in isolation. It now synchronizes on two observed lease renewals instead of expecting them within a 25 ms processor sleep, retaining a bounded timeout and checking identity, TTL, and completion. Worker implementation code is unchanged. Source changes are in `5bf4bb5` (PyJWT), `01ae028` (urllib3), and `7543531` (the test).
 
-These local checks do not substitute for the pending physical-phone and installed-app coverage above. GitHub workflow and latest website deployment outcomes are recorded only after they finish.
+For `c82ced0404b42c9ac8b411d32c2207048baf4d41`, [Python checks](https://github.com/rohit47108/stoma3d/actions/runs/38015498487) and the [repository safety audit](https://github.com/rohit47108/stoma3d/actions/runs/38015498497) both succeeded. CI passed 349 tests, skipping only the optional Torch case covered locally. Its PostgreSQL test and migration checks passed. All production dependency audits, default-gate checks, inference container smoke tests, and complete-stack builds finished successfully.
+
+The corresponding website deployment `dpl_8Myw8HqYHYc9ogidUQCueyqhJMfZ` was READY at [its immutable URL](https://stoma3d-fbaz5ybq1-rohit-singhs-projects-48f82479.vercel.app). A fresh reload of the public scan URL preserved the existing 2/8 scan. Recent observation reopened the real ventral-tongue result, showing the released Pillow anatomy version, live-model provenance, and 87% confidence. View on 3D map selected the underside region and retained both accepted regions. Screenshot: `outputs/usability-checks/web-published-map-c82ced0-2026-10-09.png`. No further photos, findings, pins, or deletions were added in this recheck.
+
+The final root-environment notice regeneration retains all 648 prior legal texts, changing only reviewed package version references and the lock hash. These checks do not substitute for the pending physical-phone, installed-app, and repeated-flow coverage above.
 
 ## Earlier Android emulator results
 
