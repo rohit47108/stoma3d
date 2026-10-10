@@ -101,7 +101,7 @@ The owner stopped computer testing again with Escape before the new package was 
 
 ## Home restoration correction
 
-The earlier installed report-recovery app retained its completed scan and recent result after restart, but Home still called the next scan “Your first scan.” Home now derives first-time or returning wording from saved, non-demo sessions. It also selects the most recent completed result by capture timestamp rather than restored array order. This change adds no persisted fields, changes no records, and leaves scan progression and analysis acceptance unchanged.
+The earlier installed report-recovery app retained its completed scan and recent result after restart, but Home still called the next scan “Your first scan.” Source `73f0290` now derives first-time or returning wording from saved, non-demo sessions. It also selects the most recent completed result by capture timestamp rather than restored array order. This change adds no persisted fields, changes no records, and leaves scan progression and analysis acceptance unchanged.
 
 Seven route tests cover first use, demo-only records, restored completed and partial scans, cleared records, out-of-order results, and failed or abstained requests. The completed-scan heading and out-of-order result tests failed before their corrections. Independent source review approved the change. These are controlled route checks with real scan logic, not a native UI mount or new simulator restart evidence. The Home update still needs an installed visual check.
 
@@ -109,7 +109,7 @@ The Home source passed 694 JavaScript tests (scripts 24, contracts 33, mobile 42
 
 ## Android test packages
 
-The following packages embed the production inference origin and public response-verification key. Android’s signature verifier accepted all six with the same Android Debug certificate. The package is `org.stoma3d.prototype`, version `0.1.0`, version code `1`, label `Stoma3D`. These are local test packages, not store releases.
+The following packages embed the production inference origin and public response-verification key. Android’s signature verifier accepted all eight with the same Android Debug certificate. The package is `org.stoma3d.prototype`, version `0.1.0`, version code `1`, label `Stoma3D`. These are local test packages, not store releases.
 
 | Ignored artifact                                               | Source    |       Bytes | SHA-256                                                            |
 | -------------------------------------------------------------- | --------- | ----------: | ------------------------------------------------------------------ |
@@ -119,8 +119,12 @@ The following packages embed the production inference origin and public response
 | `outputs/native/Stoma3D-2026-10-10-report-recovery-arm64.apk`  | `c53cd51` |  97,481,997 | `75a27ccc9bfde53fc3a3ca094fabb20bf98986ceb9c91ce9a6b64cb5ca85125a` |
 | `outputs/native/Stoma3D-2026-10-10-report-layout-x86_64.apk`   | `f8ce5ff` | 102,676,027 | `6563dcdeb28cd00179f09a45a1e46dd2b33e13d9b0e3b6fce948cff229822610` |
 | `outputs/native/Stoma3D-2026-10-10-report-layout-arm64.apk`    | `f8ce5ff` |  98,184,137 | `fbef966f940e97b13c17650540aef63e71c2855310c55f256c1ffbee090e53b5` |
+| `outputs/native/Stoma3D-2026-10-10-home-restore-x86_64.apk`    | `73f0290` | 102,676,443 | `3890cbb2e20f007be224e6349c77e2fd8b344b1acf92c0a940e906f05f32f361` |
+| `outputs/native/Stoma3D-2026-10-10-home-restore-arm64.apk`     | `73f0290` |  98,184,553 | `9129907ee99af3181f745951b0c1936e4c888b1e69b7824b9f76a02eaec7044d` |
 
 The picker-fix x86_64 build finished in 5m 8s; ARM64 finished in 1m 50s. Report-recovery x86_64 finished in 2m 42s; ARM64 finished in 4m 2s. Both report-recovery builds’ embedded report, temporary-file, and capture-route source matched the checked-in files. Report-layout x86_64 finished in 5m 47s; ARM64 finished in 2m 4s. Their embedded report, PDF-footer, and temporary-file source matched the committed source. All packages' native library directories matched their named architectures. Upstream Gradle deprecation warnings remain. Picker-fix and report-recovery x86_64 packages have the installed-emulator coverage recorded above. The report-layout x86_64 package is installed, but its new PDF and restart checks remain unverified. Physical ARM64 camera checks remain open.
+
+The Home/report x86_64 build finished in 1m 51s; ARM64 finished in 1m 41s. Each bundle's Home, report, footer, and temporary-file source matched `73f0290`. Both APKs contain the production inference origin, public verification key, and updated Home wording; their native libraries match the named architectures. Neither package has been installed: simulator input remains stopped, and no installation or restart bypassed that stop.
 
 ## iPhone bundle check
 
@@ -129,6 +133,8 @@ The existing `export:ios` script completed for `c53cd51`, bundling 2,518 modules
 The ignored export is `outputs/native/Stoma3D-2026-10-10-report-recovery-ios-export`. Its bytecode is 8,695,308 bytes, SHA-256 `fe14b3a2310588cd69ef1d6486ee9503392f1ceccc4ccc394c0135eab882d706`.
 
 The later `f8ce5ff` export completed with 2,692 modules and 42 verified assets. The ignored output is `outputs/native/Stoma3D-2026-10-10-report-layout-ios-export`. Its bytecode is 9,399,583 bytes, SHA-256 `fc6b5cee9d256eee22103c668f828b2626783a3a2f4b76c14a5093f8ce8e1960`; its production inference origin and public response key are present. These exports are the JavaScript-and-assets portion described in [Expo’s export documentation](https://docs.expo.dev/more/expo-cli/#exporting), not installable iPhone applications. Expo login remains deferred. Native compilation, Apple signing, installation, and iPhone camera/PDF tests remain open.
+
+The Home update `73f0290` also exported successfully: 2,692 modules and 42 verified assets. Its ignored output is `outputs/native/Stoma3D-2026-10-10-home-restore-ios-export`, with 9,399,507-byte bytecode, SHA-256 `8e6671802059d59ce6eeaff1f72452259a5bde4686f7901a3831927dc934b8a7`. The bytecode contains the production inference origin, public verification key, and updated Home wording. The same iPhone native-build and device checks remain open.
 
 ## Source checks
 
@@ -147,7 +153,7 @@ The existing Starlette test-client warning remains. The website’s automatic pr
 The approved plan still requires these results:
 
 - Ten consecutive native full flows on each supported platform
-- Installed `f8ce5ff` report generation, every-page visual review, and restart reopening
+- Install the `73f0290` Home/report update, check Home, generate a fresh PDF, inspect every page, and reopen it after restart
 - Installed iPhone build after the deferred Expo login and Apple signing setup
 - Physical front/back camera, focus, permissions, interruption, and sensor checks
 - iPhone HEIC and phone PDF saving; Safari on iPhone and Chrome on Android
