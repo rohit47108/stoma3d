@@ -59,6 +59,16 @@ The total is 65 image checks: 20 complete, 40 abstained, four unsupported, and o
 
 No result used a cached or manual fixture, and no disabled research head returned output. All transmitted image copies were re-encoded without EXIF metadata. Derived images stayed in memory; the probe saved only case names, canonical regions, statuses, and check outcomes in the ignored `outputs/usability-checks/live-image-controls-2026-10-10.json`. This checks service behavior, not UI recovery, saved-scan state, camera behavior, or patient-level accuracy.
 
+## Full-face checks, October 11
+
+A direct service check submitted three versions of one public-domain portrait: the original 512 × 512 image, a horizontally mirrored version, and a 256 × 256 version. Each was submitted for all eight regions, producing 24 requests. The existing test image is the NASA astronaut portrait documented by [scikit-image](https://scikit-image.org/docs/stable/api/skimage.data.html#skimage.data.astronaut); it is not a patient image or bundled app example.
+
+All 24 responses identified a face and abstained with `face_detected` as the only quality reason. None accepted the image or returned a candidate mask, descriptors, appearance output, or disease research output. All reported analysis origin `unavailable`, not a completed or fixture result. No response confused face detection with an unavailable privacy check.
+
+Health and model-card checks confirmed the unchanged October 9 release, ready privacy/analysis services, enabled anatomy/segmentation heads, and disabled fixtures. Every response passed exact-byte signature verification; altered response bytes failed verification. All 24 analysis responses passed the shared schema, and all responses had `Cache-Control: no-store`. Submitted copies had no EXIF metadata, and transformed images remained in memory.
+
+The ignored record is `outputs/usability-checks/privacy-controls-2026-10-11.json`; its helper is `outputs/usability-checks/check_privacy_controls_2026_10_11.py`. They record outcomes and public input provenance, not raw response bodies or app scan records. This verifies server rejection for one portrait and these transformations, not detector accuracy across people, local privacy checking, crop/retry behavior, or physical-camera operation. No browser or simulator control resumed.
+
 ## Android picker correction
 
 The installed app reproduced a false departure warning after selecting a photo: the review image remained available, but the screen said it had been cleared. Android’s system picker can temporarily background the app; [React Native’s AppState documentation](https://reactnative.dev/docs/0.86/appstate#app-states) describes this temporary Activity behavior.
