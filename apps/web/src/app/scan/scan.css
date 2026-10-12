@@ -1,3 +1,12 @@
+/* Keep keyboard-focused controls above the fixed mobile navigation.
+   https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/scroll-padding-bottom */
+html:has(.scan-shell) {
+  scroll-padding-bottom: var(
+    --scan-navigation-inset,
+    calc(100px + env(safe-area-inset-bottom))
+  );
+}
+
 .scan-shell {
   --porcelain: #f8faf8;
   --paper: #ffffff;
@@ -11,7 +20,10 @@
   min-height: 100dvh;
   background: var(--porcelain);
   color: var(--graphite);
-  padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  padding-bottom: var(
+    --scan-navigation-inset,
+    calc(100px + env(safe-area-inset-bottom))
+  );
 }
 
 .scan-header {
@@ -117,6 +129,9 @@
 }
 .scan-page-heading {
   display: flex;
+  /* Keep progress readable when enlarged text needs its own line.
+     https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/flex-wrap */
+  flex-wrap: wrap;
   align-items: start;
   justify-content: space-between;
   gap: 24px;
@@ -587,7 +602,8 @@
   cursor: pointer;
 }
 .scan-map-rotation {
-  position: relative;
+  /* Anchor the popup to the full control group, above wrapped zoom buttons. */
+  position: static;
 }
 .scan-map-rotation summary {
   display: flex;
@@ -744,6 +760,9 @@
 }
 
 @media (min-width: 900px) {
+  html:has(.scan-shell) {
+    scroll-padding-bottom: 0;
+  }
   .scan-shell {
     padding-bottom: 0;
     padding-left: 168px;

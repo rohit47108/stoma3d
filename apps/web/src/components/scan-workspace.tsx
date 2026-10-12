@@ -32,6 +32,7 @@ import {
 import { guestConflictRecovery, saveGuestUpdate } from "@/lib/guest-save";
 import { analyzeGuestPhoto } from "@/lib/scan-client";
 import { preparedPhotoFromSaved, type PreparedPhoto } from "@/lib/scan-image";
+import { observeScanNavigationInset } from "@/lib/scan-navigation-inset";
 
 type Destination = "home" | "scan" | "map" | "history";
 type ScanStage = "intake" | "capture" | "review" | "result";
@@ -65,7 +66,14 @@ export function ScanWorkspace() {
   const busyRef = useRef(false);
   const dataGenerationRef = useRef(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const navigationRef = useRef<HTMLElement>(null);
   const complete = guestCompletedRegions(session);
+
+  useEffect(() => {
+    const navigation = navigationRef.current;
+    if (navigation)
+      return observeScanNavigationInset(navigation, document.documentElement);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -387,7 +395,11 @@ export function ScanWorkspace() {
           </div>
         </details>
       </header>
-      <nav className="scan-nav" aria-label="Main destinations">
+      <nav
+        ref={navigationRef}
+        className="scan-nav"
+        aria-label="Main destinations"
+      >
         {destinations.map((item) => (
           <button
             type="button"
