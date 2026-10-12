@@ -6,6 +6,8 @@ All notable Stoma3D source-release changes are recorded here.
 
 ### Fixed
 
+- Opening a completed browser scan from History now shows its observation map;
+  unfinished scans still resume at the next missing region.
 - Home distinguishes returning users from first-time scans and opens the newest
   completed result even when saved records are restored out of order.
 - Native reports use compact print spacing, keep page notices clear of

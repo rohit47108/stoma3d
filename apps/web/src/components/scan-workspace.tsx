@@ -601,10 +601,11 @@ export function ScanWorkspace() {
                     onOpen={openCapture}
                     onStart={begin}
                     onResume={(item) => {
+                      const nextRegion = nextGuestRegion(item);
                       setSession(item);
-                      setRegion(nextGuestRegion(item) ?? MOUTH_REGIONS[0]);
+                      setRegion(nextRegion ?? MOUTH_REGIONS[0]);
                       setStage("capture");
-                      setDestination("scan");
+                      setDestination(nextRegion ? "scan" : "map");
                     }}
                   />
                 )}
