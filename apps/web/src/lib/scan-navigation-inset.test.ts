@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { observeScanNavigationInset } from "./scan-navigation-inset";
+import {
+  keepScanFocusVisible,
+  observeScanNavigationInset,
+} from "./scan-navigation-inset";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -65,5 +68,92 @@ describe("scan navigation inset", () => {
     const stop = observeScanNavigationInset(nodes.navigation, nodes.root);
     expect(nodes.values.get("--scan-navigation-inset")).toBe("");
     expect(stop).not.toThrow();
+  });
+});
+
+describe("scan keyboard focus visibility", () => {
+  const navigation = {
+    getBoundingClientRect: () => ({
+      left: 0,
+      right: 390,
+      top: 678,
+      height: 166,
+    }),
+  } as unknown as HTMLElement;
+
+  it("brings a control above navigation even when native focus scrolling ignores CSS padding", () => {
+    const scrollIntoView = vi.fn();
+    const control = {
+      matches: () => true,
+      getBoundingClientRect: () => ({
+        left: 16,
+        right: 256,
+        top: 727,
+        bottom: 803,
+      }),
+      scrollIntoView,
+    } as unknown as HTMLElement;
+    keepScanFocusVisible(control, navigation);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      behavior: "instant",
+      block: "center",
+      inline: "nearest",
+    });
+  });
+
+  it("does not move controls that already clear the navigation", () => {
+    const scrollIntoView = vi.fn();
+    const control = {
+      matches: () => true,
+      getBoundingClientRect: () => ({
+        left: 16,
+        right: 256,
+        top: 350,
+        bottom: 426,
+      }),
+      scrollIntoView,
+    } as unknown as HTMLElement;
+    keepScanFocusVisible(control, navigation);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("does not scroll content beside the desktop sidebar", () => {
+    const scrollIntoView = vi.fn();
+    const control = {
+      matches: () => true,
+      getBoundingClientRect: () => ({
+        left: 219,
+        right: 600,
+        top: 350,
+        bottom: 426,
+      }),
+      scrollIntoView,
+    } as unknown as HTMLElement;
+    const sidebar = {
+      getBoundingClientRect: () => ({
+        left: 0,
+        right: 168,
+        top: 76,
+        height: 768,
+      }),
+    } as unknown as HTMLElement;
+    keepScanFocusVisible(control, sidebar);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("does not move a pointer-focused button during a click", () => {
+    const scrollIntoView = vi.fn();
+    const control = {
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        left: 16,
+        right: 256,
+        top: 640,
+        bottom: 716,
+      }),
+      scrollIntoView,
+    } as unknown as HTMLElement;
+    keepScanFocusVisible(control, navigation);
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });

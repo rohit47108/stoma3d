@@ -1,5 +1,30 @@
 const INSET_PROPERTY = "--scan-navigation-inset";
 
+export function keepScanFocusVisible(
+  control: HTMLElement,
+  navigation: HTMLElement,
+) {
+  // Keep pointer clicks in place; only correct keyboard-visible focus.
+  // https://developer.mozilla.org/en-US/docs/Web/CSS/:focus-visible
+  if (!control.matches(":focus-visible")) return;
+  const target = control.getBoundingClientRect();
+  const bar = navigation.getBoundingClientRect();
+  if (
+    bar.height > 0 &&
+    target.left < bar.right &&
+    target.right > bar.left &&
+    target.bottom > bar.top - 12
+  ) {
+    // Native focus scrolling does not consistently respect CSS scroll padding.
+    // https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollIntoView
+    control.scrollIntoView({
+      behavior: "instant",
+      block: "center",
+      inline: "nearest",
+    });
+  }
+}
+
 export function observeScanNavigationInset(
   navigation: HTMLElement,
   root: HTMLElement,

@@ -32,7 +32,10 @@ import {
 import { guestConflictRecovery, saveGuestUpdate } from "@/lib/guest-save";
 import { analyzeGuestPhoto } from "@/lib/scan-client";
 import { preparedPhotoFromSaved, type PreparedPhoto } from "@/lib/scan-image";
-import { observeScanNavigationInset } from "@/lib/scan-navigation-inset";
+import {
+  keepScanFocusVisible,
+  observeScanNavigationInset,
+} from "@/lib/scan-navigation-inset";
 
 type Destination = "home" | "scan" | "map" | "history";
 type ScanStage = "intake" | "capture" | "review" | "result";
@@ -417,6 +420,10 @@ export function ScanWorkspace() {
         id="main-content"
         className="scan-content"
         aria-busy={loading || busy}
+        onFocusCapture={(event) => {
+          if (event.target instanceof HTMLElement && navigationRef.current)
+            keepScanFocusVisible(event.target, navigationRef.current);
+        }}
       >
         {loading ? (
           <div className="scan-loading" role="status">
