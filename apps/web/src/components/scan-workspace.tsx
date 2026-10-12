@@ -1,5 +1,7 @@
 "use client";
 
+import "@/lib/browser-validation";
+
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { MOUTH_REGIONS, type MouthRegion } from "@stoma3d/contracts";

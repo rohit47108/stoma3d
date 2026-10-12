@@ -6,6 +6,8 @@ All notable Stoma3D source-release changes are recorded here.
 
 ### Fixed
 
+- Scan validation avoids blocked code-generation checks while preserving all
+  input and result checks.
 - Opening a completed browser scan from History now shows its observation map;
   unfinished scans still resume at the next missing region.
 - Home distinguishes returning users from first-time scans and opens the newest
