@@ -11,7 +11,8 @@ it("validates scan inputs without probing dynamic code execution", async () => {
       throw new EvalError("Dynamic code is blocked by the page policy");
     });
 
-  // Import the real browser entry, including its shared contract dependencies.
+  // Next runs this synchronous setup before loading the application schemas.
+  await import("../instrumentation-client");
   await import("./scan-workspace");
   const { z } = await import("zod");
   const schema = z.object({ region: z.literal("dorsal_tongue") });
