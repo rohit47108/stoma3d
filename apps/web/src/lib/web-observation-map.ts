@@ -1,5 +1,8 @@
 import type { MouthRegion } from "@stoma3d/contracts";
-import { Spherical, type PerspectiveCamera } from "three";
+import type { PerspectiveCamera } from "three";
+// Use the exported math module so scan home does not eagerly load the 3D engine.
+// https://github.com/mrdoob/three.js/blob/r181/package.json
+import { Spherical } from "three/src/math/Spherical.js";
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import asset from "../../../../assets/mouth/manifest.json";
 import type { GuestPin } from "./guest-scan";

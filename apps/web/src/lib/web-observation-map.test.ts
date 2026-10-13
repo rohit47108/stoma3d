@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MOUTH_REGION_DETAILS } from "@stoma3d/contracts";
 import { PerspectiveCamera, Vector3 } from "three";
@@ -9,6 +10,20 @@ import {
   rotateWebObservationMap,
   zoomWebObservationMap,
 } from "./web-observation-map";
+
+describe("browser map startup dependencies", () => {
+  it("loads only the math helper before the 3D view is opened", () => {
+    const source = readFileSync(
+      new URL("./web-observation-map.ts", import.meta.url),
+      "utf8",
+    );
+    // A barrel import pulled the Three.js core into the initial scan-home bundle.
+    expect(source).toContain('from "three/src/math/Spherical.js"');
+    expect(source).not.toMatch(
+      /import\s*\{\s*Spherical[^}]*\}\s*from\s*"three"/,
+    );
+  });
+});
 
 describe("browser observation map metadata", () => {
   it("uses the same named meshes for all eight canonical regions", () => {
