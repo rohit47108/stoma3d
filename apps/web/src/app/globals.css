@@ -513,9 +513,11 @@ p {
 }
 
 .phone__screen {
+  --graphite: #142d31;
   min-height: 555px;
   padding: 25px 14px 18px;
   overflow: hidden;
+  color: var(--graphite);
   background: #fbfdfc;
   border-radius: 35px;
 }
@@ -1028,7 +1030,7 @@ p {
 }
 
 .report-sheet__summary span {
-  color: var(--graphite-faint);
+  color: var(--graphite-soft);
 }
 
 .report-sheet__row {
