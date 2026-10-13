@@ -130,20 +130,24 @@ export function analysisStatusTitle(
   return "Analysis unavailable";
 }
 
+export function captureInputLabel(
+  capture: Pick<CaptureRecord, "inputOrigin" | "captureSource">,
+): string {
+  return capture.inputOrigin === "bundled_demo"
+    ? "Sample photo"
+    : capture.captureSource === "photo_library"
+      ? "Uploaded photo"
+      : capture.captureSource === "camera"
+        ? "Camera photo"
+        : capture.captureSource === "video_sweep"
+          ? "Video frame"
+          : "Photo";
+}
+
 export function historyInputLabel(
   capture: Pick<CaptureRecord, "inputOrigin" | "captureSource">,
   analysisOrigin?: AnalysisResult["analysisOrigin"],
 ): string {
-  const input =
-    capture.inputOrigin === "bundled_demo"
-      ? "Sample photo"
-      : capture.captureSource === "photo_library"
-        ? "Uploaded photo"
-        : capture.captureSource === "camera"
-          ? "Camera photo"
-          : capture.captureSource === "video_sweep"
-            ? "Video frame"
-            : "Photo";
   const output =
     analysisOrigin === "live_model"
       ? "Live analysis"
@@ -154,7 +158,7 @@ export function historyInputLabel(
           : analysisOrigin === "unavailable"
             ? "Analysis unavailable"
             : "No result saved";
-  return `${input} · ${output}`;
+  return `${captureInputLabel(capture)} · ${output}`;
 }
 
 export function historyResultDescription(

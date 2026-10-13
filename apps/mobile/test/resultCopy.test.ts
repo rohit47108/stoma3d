@@ -3,6 +3,7 @@ import type { CandidateMask, VisualDescriptors } from "@stoma3d/contracts";
 
 import {
   analysisStatusTitle,
+  captureInputLabel,
   historyInputLabel,
   historyResultDescription,
   humanizeResultReason,
@@ -54,6 +55,29 @@ const descriptors: VisualDescriptors = {
 };
 
 describe("saved-photo wording", () => {
+  it.each([
+    ["photo_library", "Uploaded photo"],
+    ["camera", "Camera photo"],
+    ["video_sweep", "Video frame"],
+    [undefined, "Photo"],
+  ] as const)(
+    "describes input source %s without assuming camera capture",
+    (captureSource, expected) => {
+      expect(
+        captureInputLabel({ inputOrigin: "live_capture", captureSource }),
+      ).toBe(expected);
+    },
+  );
+
+  it("keeps bundled provenance even when a sample has a capture-source field", () => {
+    expect(
+      captureInputLabel({
+        inputOrigin: "bundled_demo",
+        captureSource: "camera",
+      }),
+    ).toBe("Sample photo");
+  });
+
   it("keeps uploaded photos distinct from camera photos", () => {
     expect(
       historyInputLabel(

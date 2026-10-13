@@ -24,7 +24,7 @@ import {
   observationImageMarkup,
   oralObservationMapMarkup,
 } from "@/lib/reportMarkup";
-import { humanizeResultReason } from "@/lib/resultCopy";
+import { captureInputLabel, humanizeResultReason } from "@/lib/resultCopy";
 import { addReportPageFooters } from "@/lib/reportPdf";
 import {
   beginReportTemporaryLease,
@@ -227,7 +227,7 @@ async function observationRows(input: ReportInput): Promise<string> {
         <div>
           <h3>${escapeHtml(label)}</h3>
           <p><strong>Captured:</strong> ${escapeHtml(new Date(capture.capturedAt).toLocaleString())}</p>
-          <p><strong>Input:</strong> ${capture.inputOrigin === "bundled_demo" ? "Bundled synthetic demonstration" : "Live user capture"}</p>
+          <p><strong>Input:</strong> ${escapeHtml(captureInputLabel(capture))}</p>
           <p><strong>Analysis:</strong> ${escapeHtml(analysis?.analysisOrigin ?? "Not analyzed")}</p>
           <p><strong>Analysis status:</strong> ${escapeHtml(analysisStatus)}</p>
           <p><strong>Quality acceptance:</strong> ${escapeHtml(qualityAcceptance)}</p>

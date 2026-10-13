@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CaptureRecord } from "../src/types";
 
 const boundary = vi.hoisted(() => ({
   print: vi.fn(),
@@ -8,6 +9,7 @@ const boundary = vi.hoisted(() => ({
   readFile: vi.fn(),
   writeFile: vi.fn(),
   footers: vi.fn(),
+  resizeImage: vi.fn(),
   files: new Set<string>(),
 }));
 
@@ -15,7 +17,7 @@ vi.mock("expo-crypto", () => ({ randomUUID: () => "test-report" }));
 vi.mock("expo-print", () => ({ printToFileAsync: boundary.print }));
 vi.mock("expo-sharing", () => ({}));
 vi.mock("expo-image-manipulator", () => ({
-  manipulateAsync: vi.fn(),
+  manipulateAsync: boundary.resizeImage,
   SaveFormat: { JPEG: "jpeg" },
 }));
 vi.mock("expo-file-system/legacy", () => ({
@@ -94,6 +96,10 @@ beforeEach(() => {
   boundary.readFile.mockResolvedValue("cGRm");
   boundary.footers.mockResolvedValue(new TextEncoder().encode("stamped pdf"));
   boundary.writeFile.mockResolvedValue(undefined);
+  boundary.resizeImage.mockResolvedValue({
+    uri: "file:///cache/report-photo.jpg",
+    base64: "AQID",
+  });
 });
 
 afterEach(() => {
@@ -102,6 +108,49 @@ afterEach(() => {
 });
 
 describe("native report file recovery", () => {
+  it.each([
+    ["live_capture", "photo_library", "Uploaded photo"],
+    ["live_capture", "camera", "Camera photo"],
+    ["live_capture", "video_sweep", "Video frame"],
+    ["live_capture", undefined, "Photo"],
+    ["bundled_demo", "developer_demo", "Sample photo"],
+  ] as const)(
+    "prints accurate input provenance for %s/%s",
+    async (inputOrigin, captureSource, expected) => {
+      boundary.print.mockResolvedValue({
+        uri: "file:///cache/Print/provenance.pdf",
+      });
+      const capture: CaptureRecord = {
+        id: "test-photo",
+        sessionId: input.session.id,
+        capturedAt: input.session.createdAt,
+        region: "dorsal_tongue",
+        angle: "primary",
+        mediaKind: "image",
+        encryptedUri: "file:///protected/photo.enc",
+        mimeType: "image/jpeg",
+        inputOrigin,
+        captureSource,
+        quality: {
+          accepted: true,
+          blurScore: 0.9,
+          exposureScore: 0.9,
+          glareScore: 0,
+          obstructionScore: 0,
+          faceDetected: false,
+          reasons: [],
+        },
+      };
+      await generateEncryptedObservationReport({
+        ...input,
+        captures: [capture],
+      });
+      const html = boundary.print.mock.calls[0][0].html as string;
+      expect(html).toContain(`<strong>Input:</strong> ${expected}</p>`);
+      expect(html).not.toContain("Live user capture");
+    },
+  );
+
   it("keeps layout notices out of fixed CSS that overlaps headings", async () => {
     boundary.print.mockResolvedValue({ uri: "file:///cache/Print/layout.pdf" });
 

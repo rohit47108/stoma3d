@@ -29,9 +29,9 @@ const formatDate = (value: string) =>
   });
 
 const statusLabel = (status: string) =>
-  status
-    .replaceAll("_", " ")
-    .replace(/^./, (character) => character.toUpperCase());
+  status === "review_unavailable"
+    ? "Observation saved"
+    : `${status.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase())} observation`;
 
 export default function MapRoute() {
   const theme = useAppTheme();
@@ -363,8 +363,8 @@ export default function MapRoute() {
               label="Coverage"
               value={
                 selectedSummary.acceptedCaptureCount
-                  ? `${selectedSummary.acceptedCaptureCount} accepted live capture${selectedSummary.acceptedCaptureCount === 1 ? "" : "s"}`
-                  : "No accepted live capture by this date"
+                  ? `${selectedSummary.acceptedCaptureCount} accepted photo${selectedSummary.acceptedCaptureCount === 1 ? "" : "s"}`
+                  : "No accepted photo by this date"
               }
             />
             <FactRow
@@ -407,7 +407,7 @@ export default function MapRoute() {
                 <Pressable
                   key={pin.id}
                   accessibilityRole="button"
-                  accessibilityLabel={`${statusLabel(pin.status)} observation. First noted ${formatDate(pin.firstObservedAt)}. ${linkedCaptures.length} linked observation${linkedCaptures.length === 1 ? "" : "s"}.`}
+                  accessibilityLabel={`${statusLabel(pin.status)}. First noted ${formatDate(pin.firstObservedAt)}. ${linkedCaptures.length} linked observation${linkedCaptures.length === 1 ? "" : "s"}.`}
                   disabled={!latestCaptureId}
                   onPress={() => {
                     if (!latestCaptureId) return;

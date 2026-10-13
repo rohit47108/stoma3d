@@ -209,6 +209,36 @@ beforeEach(() => {
 });
 
 describe("map history navigation", () => {
+  it("describes accepted uploads as photos rather than live camera captures", () => {
+    runtime.store.captures = [{ ...later, captureSource: "photo_library" }];
+    const tree = renderRoute();
+    const coverage = elements(tree).find(
+      (element) => element.props.label === "Coverage",
+    )!;
+    expect(coverage.props.value).toBe("1 accepted photo");
+  });
+
+  it("opens a saved observation even when review priority is disabled", () => {
+    runtime.store.pins = [{ ...pin, status: "review_unavailable" }];
+    const tree = renderRoute();
+    const saved = elements(tree).find(
+      (element) =>
+        typeof element.props.accessibilityLabel === "string" &&
+        element.props.accessibilityLabel.startsWith("Observation saved."),
+    );
+    expect(saved).toBeDefined();
+    expect(
+      elements(tree).some(
+        (element) => element.props.children === "Review unavailable",
+      ),
+    ).toBe(false);
+    (saved!.props.onPress as () => void)();
+    expect(runtime.navigate).toHaveBeenCalledWith({
+      pathname: "/result/[captureId]",
+      params: { captureId: later.id },
+    });
+  });
+
   it.each([undefined, "upper_lip"])(
     "uses the requested capture's region instead of a missing or conflicting region parameter (%s)",
     (region) => {
