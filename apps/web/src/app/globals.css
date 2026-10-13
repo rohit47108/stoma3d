@@ -1805,6 +1805,10 @@ p {
   padding-bottom: 120px;
 }
 
+.loading-page {
+  min-height: 100dvh;
+}
+
 .loading-line {
   display: block;
   height: 18px;
