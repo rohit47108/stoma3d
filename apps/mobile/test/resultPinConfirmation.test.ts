@@ -92,7 +92,10 @@ vi.mock("@/lib/resultCopy", () => ({
   analysisStatusTitle: () => "Analysis complete",
   humanizeResultReason: (reason: string) => reason,
 }));
-vi.mock("@/lib/usabilityFlow", () => ({ nextScanCapture: () => null }));
+vi.mock("@/lib/usabilityFlow", async () => ({
+  ...(await import("../src/lib/usabilityFlow")),
+  nextScanCapture: () => null,
+}));
 vi.mock("@/lib/secureFiles", () => ({
   decryptToTemporaryFile: vi.fn(),
   removeTemporaryFile: vi.fn(),
@@ -303,5 +306,16 @@ describe("result pin confirmation persistence", () => {
     press(button(tree, "Add observation to map"));
     await flush();
     expect(runtime.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends a fresh navigation event when the same saved result opens the map again", () => {
+    press(button(renderRoute(), "View on 3D map"));
+    press(button(renderRoute(), "View on 3D map"));
+    const [first, second] = runtime.navigate.mock.calls.map((call) => call[0]);
+    expect(first).toMatchObject({
+      pathname: "/(tabs)/map",
+      params: { captureId: capture.id, region: capture.region },
+    });
+    expect(second.params.mapRequestId).not.toBe(first.params.mapRequestId);
   });
 });

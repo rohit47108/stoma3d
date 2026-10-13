@@ -4,7 +4,7 @@ The Android simulator connection recovered. Saved results, the oral map, PDF exp
 
 ## Tested builds
 
-The first restart and PDF checks used the existing October 10 home-restore x86_64 build (`73f0290`). The new History/report increment is based on `e45735ccb9facc90e900e22c049f386083d50f79` and is committed with this record. Its application changes are limited to `timeline.tsx`, `report.tsx`, and `resultCopy.ts`, with focused regression tests.
+The first restart and PDF checks used the existing October 10 home-restore x86_64 build (`73f0290`). The History/report increment was delivered in `d6708e4f3c43a0212f6d29818fa4c1655ac18e48`. Its application changes are limited to `timeline.tsx`, `report.tsx`, and `resultCopy.ts`, with focused regression tests.
 
 Both updated release builds succeeded using the existing Windows Android helper. They embed the configured production inference URL. The x86_64 build was installed with `adb install -r`, preserving app data; the ARM64 build was compiled but not run on a physical phone.
 
@@ -55,4 +55,29 @@ The revised wording follows the product's existing design and the selected desig
 
 ## Remaining verification
 
-First separate current-scan coverage from cumulative map history, including the new-scan-after-8/8 case above. Then continue fresh uploads across all eight regions, interrupted/resumed native scans, repeated end-to-end runs, degraded-image and recovery checks, and native accessibility coverage. Camera switching and live capture still need permission and real-device checks. iPhone testing remains deferred by the user; no iOS device, store build, HEIC phone behavior, or physical Android result is claimed here.
+Continue fresh uploads across all eight regions, repeated end-to-end runs, degraded-image and recovery checks, and native accessibility coverage. Camera switching and live capture still need permission and real-device checks. iPhone testing remains deferred by the user; no iOS device, store build, HEIC phone behavior, or physical Android result is claimed here.
+
+## Follow-up: current-scan map context
+
+The cumulative-coverage issue above is corrected in the increment committed with this section. A result opens the map for its own scan. An ordinary map-tab visit opens the active scan. History explicitly exposes the existing cumulative date replay. Photos, pin links, identifiers, mesh/UV metadata, and older scans are not changed.
+
+Result-to-map navigation carries a short-lived event ID, separate from the saved capture ID. The map consumes that event using the documented [Expo Router focus effect](https://docs.expo.dev/versions/latest/sdk/router/#usefocuseffecteffect-do_not_pass_a_second_prop). This prevents retained tab parameters from selecting an old scan forever and supports reopening the same result more than once. Unrelated incoming records do not reset the selected saved scan.
+
+Both final release builds passed and include the configured production inference URL. The intermediate map-scope candidate is superseded by these v2 artifacts:
+
+| Artifact                                     |     Bytes | SHA-256                                                            |
+| -------------------------------------------- | --------: | ------------------------------------------------------------------ |
+| `Stoma3D-2026-10-13-map-scope-v2-x86_64.apk` | 102677083 | `ae1c0ff04ee6a84fff49f7897eff7c5c7191d9cabf7f1d2754204d56b55862bb` |
+| `Stoma3D-2026-10-13-map-scope-v2-arm64.apk`  |  98185193 | `bcbbbd09c0969e468d66a4a49f062786a6267e05109587961058626b12b49b8b` |
+
+The x86_64 v2 build was installed without clearing data. Native interface checks confirmed:
+
+- Home restored the new scan as 1 of 8 with its fresh tongue result.
+- Opening the map through the bottom tab showed Current scan, 1/8 coverage, and no pin borrowed from the older scan. The 3D model rendered.
+- History showed Across saved scans, cumulative 8/8 coverage, and the older confirmed pin. Previous scan showed the October 10 frame.
+- Back to scan restored Current scan and 1/8, hiding that older pin.
+- Returning Home kept the unfinished scan available. Continue scan opened Region 2 of 8, the underside of the tongue, rather than retaking the accepted top-of-tongue photo.
+
+Full JavaScript checks passed with 736 tests (24 scripts, 33 contracts, 455 mobile, 224 web). Workspace TypeScript, Prettier, and diff checks passed. The Python recheck passed 349 tests with the same external skip and warning. A separate source review caught the retained-parameter defect in the first candidate; regressions failed before its correction and passed afterward. Re-review found no remaining blocker and independently passed 46 focused tests. The empty-current-scan, repeated same-result request, plain refocus, unrelated-record arrival, and historical pin-cutoff cases are automated route tests, not additional physical-device observations.
+
+`97a9031` completes the prior controlled route-test analysis metadata and checks it against the shared schema; it changes no runtime response or model output. The preceding History/report source passed [TypeScript CI](https://github.com/rohit47108/stoma3d/actions/runs/38353965450) and [repository safety CI](https://github.com/rohit47108/stoma3d/actions/runs/38353965324). CI for the map increment is checked separately after pushing. No web, inference, stored-state, encryption, deletion, or signing implementation changed in the map increment. ARM64 remains build-only evidence.

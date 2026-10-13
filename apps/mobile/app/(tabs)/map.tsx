@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { router, useLocalSearchParams } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { MOUTH_REGION_DETAILS, type MouthRegion } from "@stoma3d/contracts";
@@ -46,12 +46,15 @@ export default function MapRoute() {
   const [selected, setSelected] = useState<MouthRegion | null>(null);
   // Use this tab's own result request, not background routes' search params.
   // Source: https://docs.expo.dev/router/reference/url-parameters/#local-versus-global-url-parameters
-  const { region, captureId } = useLocalSearchParams<{
+  const { region, captureId, mapRequestId } = useLocalSearchParams<{
     region?: string;
     captureId?: string;
+    mapRequestId?: string;
   }>();
-  const requestedRegion =
-    captures.find((capture) => capture.id === captureId)?.region ?? region;
+  const requestedCapture = captures.find((capture) => capture.id === captureId);
+  const requestedCaptureSessionId = requestedCapture?.sessionId;
+  const requestedCaptureRegion = requestedCapture?.region;
+  const requestedRegion = requestedCapture?.region ?? region;
   useEffect(() => {
     const matched = MOUTH_REGION_DETAILS.find(
       (detail) => detail.id === requestedRegion,
@@ -70,14 +73,50 @@ export default function MapRoute() {
     captureId,
   );
   const [replayIndex, setReplayIndex] = useState(requestedReplayIndex);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [requestedSessionId, setRequestedSessionId] = useState<string | null>(
+    null,
+  );
+  const handledRequest = useRef<string | undefined>(undefined);
+  const selectedSessionId =
+    requestedSessionId ?? activeSessionId ?? frames.at(-1)?.sessionId;
+  const scanCaptures = useMemo(
+    () => captures.filter((capture) => capture.sessionId === selectedSessionId),
+    [captures, selectedSessionId],
+  );
+  const scanFrames = useMemo(
+    () => buildObservationReplayFrames(scanCaptures, analyses, pins),
+    [analyses, scanCaptures, pins],
+  );
+
+  // Tabs retain their params. Consume a fresh result request once; a plain tab
+  // return shows the active scan, not a stale result. Legacy links still work.
+  // https://docs.expo.dev/versions/latest/sdk/router/#usefocuseffecteffect-do_not_pass_a_second_prop
+  useFocusEffect(
+    useCallback(() => {
+      const requestKey = mapRequestId ?? captureId;
+      const freshRequest =
+        requestKey !== undefined && requestKey !== handledRequest.current;
+      handledRequest.current = requestKey;
+      setRequestedSessionId(
+        freshRequest ? (requestedCaptureSessionId ?? null) : null,
+      );
+      if (freshRequest && requestedCaptureRegion)
+        setSelected(requestedCaptureRegion);
+      setHistoryOpen(false);
+      setReplaying(false);
+    }, [
+      activeSessionId,
+      captureId,
+      mapRequestId,
+      requestedCaptureSessionId,
+      requestedCaptureRegion,
+    ]),
+  );
 
   useEffect(() => {
-    setReplayIndex(requestedReplayIndex);
-    setReplaying(false);
-  }, [captureId, frames.length, requestedReplayIndex]);
-
-  useEffect(() => {
-    if (!replaying || reduceMotion || frames.length < 2) return undefined;
+    if (!historyOpen || !replaying || reduceMotion || frames.length < 2)
+      return undefined;
     const interval = setInterval(
       () => {
         setReplayIndex((current) => {
@@ -91,35 +130,34 @@ export default function MapRoute() {
       animationDurationMs(1_250, animationSpeed),
     );
     return () => clearInterval(interval);
-  }, [animationSpeed, frames.length, reduceMotion, replaying]);
+  }, [animationSpeed, frames.length, historyOpen, reduceMotion, replaying]);
 
   const latestSummaries = useMemo(
-    () => buildRegionObservationSummaries(captures, analyses, pins),
-    [analyses, captures, pins],
+    () => buildRegionObservationSummaries(scanCaptures, analyses, pins),
+    [analyses, scanCaptures, pins],
   );
-  const frame = frames[replayIndex];
+  const frame = historyOpen ? frames[replayIndex] : scanFrames.at(-1);
   const summaries = frame?.summaries ?? latestSummaries;
   const completed =
     frame?.completedRegions ??
     MOUTH_REGION_DETAILS.filter(
       (detail) => summaries[detail.id].acceptedCaptureCount > 0,
     ).map((detail) => detail.id);
-  const visiblePinIds =
-    frame?.visiblePinIds ??
-    pins
-      .filter((pin) => summaries[pin.region].confirmedPinCount > 0)
-      .map((pin) => pin.id);
+  const visiblePinIds = frame?.visiblePinIds ?? [];
   const visiblePinSet = new Set(visiblePinIds);
   const visiblePins = pins.filter((pin) => visiblePinSet.has(pin.id));
   const capturesById = new Map(
-    captures.map((capture) => [capture.id, capture]),
+    (historyOpen ? captures : scanCaptures).map((capture) => [
+      capture.id,
+      capture,
+    ]),
   );
   const detail = selected ? DETAIL_BY_REGION.get(selected) : undefined;
   const selectedSummary = selected ? summaries[selected] : null;
   const regionPins = selected
     ? visiblePins.filter((pin) => pin.region === selected)
     : [];
-  const hasLiveHistory = frames.length > 0;
+  const hasVisibleCaptures = completed.length > 0;
 
   const moveReplay = (direction: -1 | 1) => {
     setReplaying(false);
@@ -138,12 +176,46 @@ export default function MapRoute() {
   };
 
   return (
-    <Screen title="3D Map">
+    <Screen
+      title="3D Map"
+      eyebrow={
+        historyOpen
+          ? "Across saved scans"
+          : selectedSessionId
+            ? selectedSessionId === activeSessionId
+              ? "Current scan"
+              : "Selected scan"
+            : undefined
+      }
+      action={
+        frames.length > 0 ? (
+          <Button
+            label={historyOpen ? "Back to scan" : "History"}
+            variant="ghost"
+            accessibilityState={{ expanded: historyOpen }}
+            onPress={() => {
+              setReplaying(false);
+              if (!historyOpen) {
+                const selectedFrameIndex = frames.findIndex(
+                  (item) => item.sessionId === selectedSessionId,
+                );
+                setReplayIndex(
+                  selectedFrameIndex >= 0
+                    ? selectedFrameIndex
+                    : frames.length - 1,
+                );
+              }
+              setHistoryOpen(!historyOpen);
+            }}
+          />
+        ) : undefined
+      }
+    >
       <Text style={[styles.intro, { color: theme.secondaryText }]}>
         Tap a region to explore your photos and observations.
       </Text>
 
-      {frames.length > 1 ? (
+      {historyOpen && frames.length > 1 ? (
         <View
           style={[
             styles.replayPanel,
@@ -251,7 +323,7 @@ export default function MapRoute() {
         showRegionList
       />
 
-      {!hasLiveHistory ? (
+      {!hasVisibleCaptures ? (
         <Card>
           <EmptyState
             icon="map-outline"
@@ -259,10 +331,12 @@ export default function MapRoute() {
             body="Your photos and confirmed observations will appear here as you scan."
             action={
               <Button
-                label="Start scan"
+                label={activeSessionId ? "Continue scan" : "Start scan"}
                 icon="scan-outline"
                 variant="secondary"
-                onPress={() => router.push("/onboarding")}
+                onPress={() =>
+                  router.push(activeSessionId ? "/(tabs)/scan" : "/onboarding")
+                }
               />
             }
           />
@@ -386,7 +460,11 @@ export default function MapRoute() {
 
         {detail && activeSessionId ? (
           <Button
-            label="Capture this region"
+            label={
+              historyOpen || selectedSessionId !== activeSessionId
+                ? "Capture in current scan"
+                : "Capture this region"
+            }
             icon="camera-outline"
             variant="secondary"
             onPress={() =>

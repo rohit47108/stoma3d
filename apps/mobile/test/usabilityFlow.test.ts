@@ -4,6 +4,7 @@ import {
   nextScanCapture,
   resumableSession,
   intakeProfileForScan,
+  observationMapRequest,
 } from "../src/lib/usabilityFlow";
 import type { CaptureRecord, ScanSession } from "../src/types";
 
@@ -44,6 +45,18 @@ const capture = (
 });
 
 describe("simple scan progression", () => {
+  it("gives each map-opening action its own request without changing saved capture IDs", () => {
+    const photo = capture("one", "dorsal_tongue");
+    const before = { ...photo };
+    const first = observationMapRequest(photo);
+    const second = observationMapRequest(photo);
+    expect(first).toMatchObject({
+      pathname: "/(tabs)/map",
+      params: { captureId: photo.id, region: photo.region },
+    });
+    expect(first.params.mapRequestId).not.toBe(second.params.mapRequestId);
+    expect(photo).toEqual(before);
+  });
   it("resumes the first missing region, not an already accepted one", () => {
     expect(
       nextScanCapture(session("one"), [capture("one", "dorsal_tongue")]),

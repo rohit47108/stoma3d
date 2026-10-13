@@ -29,7 +29,7 @@ import { evaluateBundledGuidance } from "@/lib/guidanceRules";
 import { scheduleObservationReminder } from "@/lib/notifications";
 import { reminderSuggestion } from "@/lib/reminderPolicy";
 import { analysisStatusTitle, humanizeResultReason } from "@/lib/resultCopy";
-import { nextScanCapture } from "@/lib/usabilityFlow";
+import { nextScanCapture, observationMapRequest } from "@/lib/usabilityFlow";
 import { decryptToTemporaryFile, removeTemporaryFile } from "@/lib/secureFiles";
 import { useStoma3DStore } from "@/store/useStoma3DStore";
 import { useAppTheme } from "@/theme";
@@ -988,10 +988,7 @@ export default function ResultRoute() {
         onPress={() => {
           if (pinConfirmationPending.current || navigationPending.current)
             return;
-          router.push({
-            pathname: "/(tabs)/map",
-            params: { region: capture.region, captureId: capture.id },
-          });
+          router.push(observationMapRequest(capture));
         }}
       />
       <Text style={[styles.limitation, { color: theme.secondaryText }]}>

@@ -6,6 +6,21 @@ import {
 import { detailedScanProgress } from "./scanLogic";
 import type { CaptureRecord, IntakeProfile, ScanSession } from "../types";
 
+// A navigation event only: never persisted or used as a capture/security ID.
+let mapRequestSequence = 0;
+export function observationMapRequest(
+  capture: Pick<CaptureRecord, "id" | "region">,
+) {
+  return {
+    pathname: "/(tabs)/map" as const,
+    params: {
+      region: capture.region,
+      captureId: capture.id,
+      mapRequestId: String(++mapRequestSequence),
+    },
+  };
+}
+
 export function nextScanCapture(
   session: ScanSession,
   captures: readonly CaptureRecord[],
