@@ -1,6 +1,12 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MOUTH_REGIONS, type AnalysisResult } from "@stoma3d/contracts";
+import {
+  MOUTH_REGIONS,
+  CONTRACT_VERSION,
+  DISCLAIMER,
+  analysisResultSchema,
+  type AnalysisResult,
+} from "@stoma3d/contracts";
 import type { CaptureRecord, ReportRecord, ScanSession } from "../src/types";
 
 // Execute the real routes and handlers; native components and file work are
@@ -110,6 +116,7 @@ function capture(
 }
 function analysis(photo: CaptureRecord): AnalysisResult {
   return {
+    contractVersion: CONTRACT_VERSION,
     captureId: photo.id,
     region: photo.region,
     quality: photo.quality,
@@ -128,6 +135,8 @@ function analysis(photo: CaptureRecord): AnalysisResult {
       boundingBox: [0.1, 0.1, 0.2, 0.2],
       normalizedArea: 0.1,
     },
+    appearanceOutput: null,
+    diseaseResearchOutput: null,
     descriptors: {
       normalizedArea: 0.1,
       perimeter: 0.4,
@@ -149,6 +158,7 @@ function analysis(photo: CaptureRecord): AnalysisResult {
     inputOrigin: "live_capture",
     analysisOrigin: "live_model",
     status: "complete",
+    disclaimer: DISCLAIMER,
   };
 }
 const report: ReportRecord = {
@@ -204,6 +214,12 @@ beforeEach(() => {
 });
 
 describe("focused History", () => {
+  it("uses complete shared-contract analysis metadata in route tests", () => {
+    expect(
+      analysisResultSchema.safeParse(analysis(capture("dorsal_tongue")))
+        .success,
+    ).toBe(true);
+  });
   it("opens with saved photos instead of comparison panels", () => {
     const tree = render(TimelineRoute);
     expect(
