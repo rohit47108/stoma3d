@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { router } from "expo-router";
 import { StyleSheet, Text } from "react-native";
 
@@ -29,6 +29,7 @@ export default function ReportRoute() {
   const [busy, setBusy] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const operationActive = useRef(false);
   const session = sessions.find((item) => item.id === activeSessionId);
   const sessionCaptures = captures.filter(
     (capture) => capture.sessionId === activeSessionId,
@@ -63,7 +64,8 @@ export default function ReportRoute() {
     : false;
 
   const generate = async () => {
-    if (!session) return;
+    if (!session || operationActive.current) return;
+    operationActive.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -86,22 +88,42 @@ export default function ReportRoute() {
           : "Report generation failed.",
       );
     } finally {
+      operationActive.current = false;
       setBusy(false);
+    }
+  };
+
+  const share = async () => {
+    if (!latest || operationActive.current) return;
+    operationActive.current = true;
+    setShareBusy(true);
+    setError(null);
+    try {
+      await shareEncryptedReport(latest);
+    } catch (shareError) {
+      setError(
+        shareError instanceof Error
+          ? shareError.message
+          : "Could not export the PDF. Try again.",
+      );
+    } finally {
+      operationActive.current = false;
+      setShareBusy(false);
     }
   };
 
   if (!session || !progress || progress.completed < progress.total)
     return (
-      <Screen title="Local report">
+      <Screen title="Scan report">
         <Card>
           <EmptyState
             icon="document-outline"
             title={
               session
-                ? `Complete all eight regions (${progress?.completed ?? 0}/8)`
-                : "No active session"
+                ? `Finish your scan (${progress?.completed ?? 0} of 8)`
+                : "Start a scan first"
             }
-            body="A local observation report for clinician discussion is generated only after one quality-accepted capture exists for every canonical region."
+            body="Save an accepted photo for all eight regions to create your PDF."
             action={
               <Button
                 label="Go to scan"
@@ -114,18 +136,8 @@ export default function ReportRoute() {
     );
   return (
     <Screen
-      title={
-        syntheticReport
-          ? "Synthetic demonstration report"
-          : "Local observation report"
-      }
-      eyebrow={
-        syntheticReport
-          ? "Not patient data"
-          : latest
-            ? "Generated and encrypted locally"
-            : "Ready to generate locally"
-      }
+      title={syntheticReport ? "Synthetic demonstration report" : "Scan report"}
+      eyebrow={syntheticReport ? "Not patient data" : "Saved on this device"}
       action={
         <Button label="Back" variant="ghost" onPress={() => router.back()} />
       }
@@ -139,30 +151,18 @@ export default function ReportRoute() {
           />
         </Card>
       ) : null}
-      <Card accent="teal">
-        <SectionTitle title="What is included" icon="document-text-outline" />
-        <Text style={[styles.body, { color: theme.text }]}>
-          Consent status, session-snapshotted intake context, eight-region
-          coverage, protected images when available, observation-map pins,
-          user-confirmed comparisons, segmentation-derived descriptors,
-          uncertainty, provenance, and model versions.
-        </Text>
-        <Text style={[styles.body, { color: theme.secondaryText }]}>
-          The PDF repeats the non-diagnostic statement and labels every
-          image-normalized measurement approximate. Millimeter values appear
-          only as a calibrated estimate when the reference-card check passes.
-        </Text>
-      </Card>
-      <Button
-        label={latest ? "Regenerate report" : "Generate protected PDF"}
-        icon="document-lock-outline"
-        loading={busy}
-        loadingLabel="Generating and protecting PDF..."
-        disabled={busy || shareBusy}
-        onPress={() => {
-          void generate();
-        }}
-      />
+      <Text
+        style={[
+          styles.body,
+          {
+            color: theme.secondaryText,
+            fontSize: 15 * theme.fontScale,
+            lineHeight: 23 * theme.fontScale,
+          },
+        ]}
+      >
+        Your photos, scan notes, and observations in one PDF.
+      </Text>
       {latest ? (
         <Card>
           <SectionTitle
@@ -171,33 +171,41 @@ export default function ReportRoute() {
             icon="checkmark-circle-outline"
           />
           <Button
-            label="Share a temporary decrypted copy"
-            variant="secondary"
+            label="Export PDF"
             icon="share-outline"
             loading={shareBusy}
-            loadingLabel="Opening secure share sheet..."
+            loadingLabel="Opening PDF..."
             disabled={busy || shareBusy}
             onPress={() => {
-              setShareBusy(true);
-              setError(null);
-              void shareEncryptedReport(latest)
-                .catch((shareError: unknown) =>
-                  setError(
-                    shareError instanceof Error
-                      ? shareError.message
-                      : "Sharing failed.",
-                  ),
-                )
-                .finally(() => setShareBusy(false));
+              void share();
             }}
           />
-          <Text style={[styles.small, { color: theme.secondaryText }]}>
-            The app decrypts a temporary copy only for the operating-system
-            share sheet and deletes it afterward. This button does not create a
-            cloud link. Revocable QR sharing remains a separate account action.
-          </Text>
         </Card>
       ) : null}
+      <Button
+        label={latest ? "Update report" : "Generate PDF"}
+        variant={latest ? "ghost" : "primary"}
+        icon="document-lock-outline"
+        loading={busy}
+        loadingLabel="Creating PDF..."
+        disabled={busy || shareBusy}
+        onPress={() => {
+          void generate();
+        }}
+      />
+      <Text
+        style={[
+          styles.small,
+          {
+            color: theme.secondaryText,
+            fontSize: 12 * theme.fontScale,
+            lineHeight: 18 * theme.fontScale,
+          },
+        ]}
+      >
+        Your saved report is encrypted. Export opens a copy you can save or
+        share.
+      </Text>
       {error ? (
         <Text
           accessibilityRole="alert"

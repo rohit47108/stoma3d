@@ -1,4 +1,5 @@
-import type { AnalysisStatus } from "@stoma3d/contracts";
+import type { AnalysisResult, AnalysisStatus } from "@stoma3d/contracts";
+import type { CaptureRecord } from "../types";
 
 const RESULT_REASON_COPY: Readonly<Record<string, string>> = {
   image_too_small: "The image is too small to evaluate reliably.",
@@ -127,4 +128,49 @@ export function analysisStatusTitle(
   if (status === "abstained") return "No abnormal-area result shown";
   if (status === "unsupported") return "Image unsupported";
   return "Analysis unavailable";
+}
+
+export function historyInputLabel(
+  capture: Pick<CaptureRecord, "inputOrigin" | "captureSource">,
+  analysisOrigin?: AnalysisResult["analysisOrigin"],
+): string {
+  const input =
+    capture.inputOrigin === "bundled_demo"
+      ? "Sample photo"
+      : capture.captureSource === "photo_library"
+        ? "Uploaded photo"
+        : capture.captureSource === "camera"
+          ? "Camera photo"
+          : capture.captureSource === "video_sweep"
+            ? "Video frame"
+            : "Photo";
+  const output =
+    analysisOrigin === "live_model"
+      ? "Live analysis"
+      : analysisOrigin === "cached_model_result"
+        ? "Cached analysis"
+        : analysisOrigin === "manual_fixture"
+          ? "Manual example"
+          : analysisOrigin === "unavailable"
+            ? "Analysis unavailable"
+            : "No result saved";
+  return `${input} · ${output}`;
+}
+
+export function historyResultDescription(
+  analysis:
+    | Pick<AnalysisResult, "status" | "candidateMask" | "descriptors">
+    | undefined,
+): string {
+  if (
+    analysis?.status === "complete" &&
+    analysis.candidateMask &&
+    analysis.descriptors
+  ) {
+    return `Area outlined · Approx. ${(analysis.descriptors.normalizedArea * 100).toFixed(1)}% of photo`;
+  }
+  return analysisStatusTitle(
+    analysis?.status,
+    Boolean(analysis?.candidateMask),
+  );
 }

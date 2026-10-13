@@ -13,8 +13,12 @@ import {
 } from "@/components/Ui";
 import { VisualTrajectoryChart } from "@/components/VisualTrajectoryChart";
 import { isEligibleLongitudinalCapture } from "@/lib/longitudinalPolicy";
-import { humanizeResultReason } from "@/lib/resultCopy";
-import { buildTrajectorySeries, captureQualityScore } from "@/lib/trajectory";
+import {
+  historyInputLabel,
+  historyResultDescription,
+  humanizeResultReason,
+} from "@/lib/resultCopy";
+import { buildTrajectorySeries } from "@/lib/trajectory";
 import { useStoma3DStore } from "@/store/useStoma3DStore";
 import { useAppTheme } from "@/theme";
 
@@ -32,16 +36,12 @@ export default function TimelineRoute() {
   const analyses = useStoma3DStore((state) => state.analyses);
   const comparisons = useStoma3DStore((state) => state.comparisons);
   const pins = useStoma3DStore((state) => state.pins);
-  const sessions = useStoma3DStore((state) => state.sessions);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTrajectoryRegion, setSelectedTrajectoryRegion] =
     useState<MouthRegion | null>(null);
   const capturesById = useMemo(
     () => new Map(captures.map((capture) => [capture.id, capture])),
     [captures],
-  );
-  const sessionsById = useMemo(
-    () => new Map(sessions.map((session) => [session.id, session])),
-    [sessions],
   );
   const eligibleLiveSessions = new Map<string, Set<string>>();
   for (const capture of captures) {
@@ -67,7 +67,19 @@ export default function TimelineRoute() {
     ) ?? trajectories[0];
 
   return (
-    <Screen title="History">
+    <Screen
+      title="History"
+      action={
+        captures.length > 0 ? (
+          <Button
+            label={toolsOpen ? "Done" : "Tools"}
+            variant="ghost"
+            accessibilityState={{ expanded: toolsOpen }}
+            onPress={() => setToolsOpen(!toolsOpen)}
+          />
+        ) : undefined
+      }
+    >
       {captures.length === 0 ? (
         <Card>
           <EmptyState
@@ -85,152 +97,157 @@ export default function TimelineRoute() {
         </Card>
       ) : (
         <>
-          <Card accent="amber">
-            <SectionTitle
-              title="Review before linking"
-              subtitle={
-                comparisonReady
-                  ? "Two accepted live observations of the same region from separate scans are available. Stoma3D can request a gated match suggestion, but you must review and confirm the pair before any change calculation is attempted."
-                  : "A comparison requires accepted live captures of the same region from two separate scans. An honest model abstention does not hide an otherwise valid capture."
-              }
-              icon="person-circle-outline"
-            />
-            <Button
-              label="Compare two observations"
-              icon="git-compare-outline"
-              disabled={!comparisonReady}
-              onPress={() => router.push("/compare")}
-            />
-            {!comparisonReady ? (
-              <Text style={[styles.detail, { color: theme.secondaryText }]}>
-                Capture the same region in another live scan, then return here.
-              </Text>
-            ) : null}
-          </Card>
-          {selectedTrajectory ? (
-            <Card accent="teal">
+          {toolsOpen ? (
+            <>
+              <Card>
+                <SectionTitle
+                  title="Compare scans"
+                  subtitle={
+                    comparisonReady
+                      ? "Choose photos from two scans, then confirm they show the same observation."
+                      : "Save the same region in another scan to compare photos."
+                  }
+                  icon="person-circle-outline"
+                />
+                <Button
+                  label="Compare photos"
+                  icon="git-compare-outline"
+                  disabled={!comparisonReady}
+                  onPress={() => router.push("/compare")}
+                />
+              </Card>
+              {selectedTrajectory ? (
+                <Card accent="teal">
+                  <SectionTitle
+                    title="Area over time"
+                    subtitle="Dots show approximate area in each photo. A line connects only confirmed, comparable observations."
+                    icon="trending-up-outline"
+                  />
+                  <View
+                    accessibilityRole="radiogroup"
+                    style={styles.trajectoryChoices}
+                  >
+                    {trajectories.map((trajectory) => {
+                      const label =
+                        REGION_DETAIL_BY_ID.get(trajectory.region)
+                          ?.shortLabel ?? trajectory.region;
+                      return (
+                        <ChoiceChip
+                          key={trajectory.region}
+                          label={`${label} (${trajectory.points.length})`}
+                          selected={
+                            selectedTrajectory.region === trajectory.region
+                          }
+                          accessibilityRole="radio"
+                          onPress={() =>
+                            setSelectedTrajectoryRegion(trajectory.region)
+                          }
+                        />
+                      );
+                    })}
+                  </View>
+                  <VisualTrajectoryChart points={selectedTrajectory.points} />
+                  <Text style={[styles.detail, { color: theme.secondaryText }]}>
+                    Separate dots do not show growth or shrinkage. Area is
+                    relative to the photo, not measured in millimeters.
+                  </Text>
+                </Card>
+              ) : null}
+            </>
+          ) : (
+            <Card>
               <SectionTitle
-                title="Visual-change trajectory"
-                subtitle="Each dot is one image-normalized estimate. A solid segment appears only when that exact pair passed user confirmation and every comparison gate."
-                icon="trending-up-outline"
+                title="Saved photos"
+                subtitle="Open a photo to see its result."
+                icon="time-outline"
               />
-              <View
-                accessibilityRole="radiogroup"
-                style={styles.trajectoryChoices}
-              >
-                {trajectories.map((trajectory) => {
+              {captures
+                .slice()
+                .sort((left, right) =>
+                  right.capturedAt.localeCompare(left.capturedAt),
+                )
+                .map((capture) => {
+                  const analysis = analyses[capture.id];
                   const label =
-                    REGION_DETAIL_BY_ID.get(trajectory.region)?.shortLabel ??
-                    trajectory.region;
+                    REGION_DETAIL_BY_ID.get(capture.region)?.shortLabel ??
+                    capture.region;
+                  const detail = historyResultDescription(analysis);
+                  const provenance = historyInputLabel(
+                    capture,
+                    analysis?.analysisOrigin,
+                  );
                   return (
-                    <ChoiceChip
-                      key={trajectory.region}
-                      label={`${label} (${trajectory.points.length})`}
-                      selected={selectedTrajectory.region === trajectory.region}
-                      accessibilityRole="radio"
+                    <Pressable
+                      key={capture.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Open ${label} result from ${new Date(capture.capturedAt).toLocaleString()}. ${detail}. ${provenance}`}
                       onPress={() =>
-                        setSelectedTrajectoryRegion(trajectory.region)
+                        router.push({
+                          pathname: "/result/[captureId]",
+                          params: { captureId: capture.id },
+                        })
                       }
-                    />
+                      style={({ pressed }) => [
+                        styles.event,
+                        {
+                          borderBottomColor: theme.border,
+                          backgroundColor: pressed ? theme.mint : "transparent",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.date,
+                          {
+                            color: theme.secondaryText,
+                            fontSize: 12 * theme.fontScale,
+                          },
+                        ]}
+                      >
+                        {new Date(capture.capturedAt).toLocaleString()}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.title,
+                          { color: theme.text, fontSize: 16 * theme.fontScale },
+                        ]}
+                      >
+                        {label}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.detail,
+                          {
+                            color: theme.secondaryText,
+                            fontSize: 13 * theme.fontScale,
+                            lineHeight: 19 * theme.fontScale,
+                          },
+                        ]}
+                      >
+                        {detail}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.provenance,
+                          {
+                            color: theme.secondaryText,
+                            fontSize: 12 * theme.fontScale,
+                          },
+                        ]}
+                      >
+                        {provenance}
+                      </Text>
+                      <Text style={[styles.open, { color: theme.primary }]}>
+                        Open saved result →
+                      </Text>
+                    </Pressable>
                   );
                 })}
-              </View>
-              <VisualTrajectoryChart points={selectedTrajectory.points} />
-              <Text style={[styles.detail, { color: theme.secondaryText }]}>
-                Unconnected dots must not be read as growth or shrinkage.
-                Measurements are approximate and are not millimeters.
-              </Text>
             </Card>
-          ) : null}
-          <Card>
-            <SectionTitle
-              title="Observation history"
-              subtitle="Tap a saved observation to reopen its image and honest analysis state."
-              icon="time-outline"
-            />
-            {captures
-              .slice()
-              .sort((left, right) =>
-                right.capturedAt.localeCompare(left.capturedAt),
-              )
-              .map((capture) => {
-                const analysis = analyses[capture.id];
-                const session = sessionsById.get(capture.sessionId);
-                const symptomSummary = session?.intakeProfile?.symptoms.length
-                  ? session.intakeProfile.symptoms.join(", ")
-                  : "none reported";
-                const qualityScore = Math.round(
-                  captureQualityScore(capture.quality) * 100,
-                );
-                const label =
-                  REGION_DETAIL_BY_ID.get(capture.region)?.shortLabel ??
-                  capture.region;
-                const detail =
-                  analysis?.status === "complete" && analysis.descriptors
-                    ? `Approx. area ${(analysis.descriptors.normalizedArea * 100).toFixed(1)}% - confidence ${Math.round(analysis.uncertainty.overallConfidence * 100)}%`
-                    : analysis?.status === "complete"
-                      ? "Analysis completed - no candidate outline was returned; this does not rule out disease"
-                      : analysis?.status === "abstained"
-                        ? "Analysis abstained - no visual result was produced"
-                        : analysis?.status === "unsupported"
-                          ? "Image unsupported - open for details or retake"
-                          : analysis?.status === "failed"
-                            ? "Analysis unavailable - open to retry the saved image"
-                            : "No stored analysis response - open for details";
-                return (
-                  <Pressable
-                    key={capture.id}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open ${label} observation from ${new Date(capture.capturedAt).toLocaleString()}. ${detail}`}
-                    onPress={() =>
-                      router.push({
-                        pathname: "/result/[captureId]",
-                        params: { captureId: capture.id },
-                      })
-                    }
-                    style={({ pressed }) => [
-                      styles.event,
-                      {
-                        borderLeftColor:
-                          analysis?.status === "complete"
-                            ? theme.primary
-                            : theme.amber,
-                        backgroundColor: pressed ? theme.mint : "transparent",
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.date, { color: theme.secondaryText }]}>
-                      {new Date(capture.capturedAt).toLocaleString()}
-                    </Text>
-                    <Text style={[styles.title, { color: theme.text }]}>
-                      {label}
-                    </Text>
-                    <Text
-                      style={[styles.detail, { color: theme.secondaryText }]}
-                    >
-                      {detail}
-                    </Text>
-                    <Text
-                      style={[styles.detail, { color: theme.secondaryText }]}
-                    >
-                      Image quality {qualityScore}% · Reported symptoms:{" "}
-                      {symptomSummary}
-                    </Text>
-                    <Text style={[styles.provenance, { color: theme.primary }]}>
-                      {capture.inputOrigin === "bundled_demo"
-                        ? `Synthetic input - ${analysis?.analysisOrigin ?? "not analyzed"}`
-                        : `Live capture - ${analysis?.analysisOrigin ?? "not analyzed"}`}
-                    </Text>
-                    <Text style={[styles.open, { color: theme.primary }]}>
-                      Open saved result →
-                    </Text>
-                  </Pressable>
-                );
-              })}
-          </Card>
+          )}
         </>
       )}
-      {comparisons.length ? (
+      {toolsOpen && comparisons.length > 0 ? (
         <Card>
           <SectionTitle
             title="User-confirmed comparison results"
@@ -282,7 +299,7 @@ export default function TimelineRoute() {
             })}
         </Card>
       ) : null}
-      {pins.length ? (
+      {toolsOpen && pins.length > 0 ? (
         <Card>
           <SectionTitle
             title="Observation-map links"
@@ -309,11 +326,11 @@ export default function TimelineRoute() {
 
 const styles = StyleSheet.create({
   event: {
-    borderLeftWidth: 3,
-    borderRadius: 10,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    gap: 3,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 16,
+    gap: 5,
   },
   date: { fontSize: 11, fontWeight: "700" },
   title: { fontSize: 16, fontWeight: "800" },
