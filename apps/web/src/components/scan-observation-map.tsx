@@ -13,6 +13,7 @@ import type {
 import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   WEB_MAP_MESHES,
+  WEB_FALLBACK_REGION_POSITIONS,
   WEB_REGION_POSITIONS,
   WEB_REGION_SCALES,
   webPinPosition,
@@ -337,18 +338,18 @@ export function ScanObservationMap({
               <ellipse cx="180" cy="140" rx="133" ry="105" fill="#ebc3c6" />
               <ellipse cx="180" cy="135" rx="100" ry="76" fill="#8d525d" />
               {MOUTH_REGION_DETAILS.map((item, i) => {
-                const [x, y] = WEB_REGION_POSITIONS[item.id];
+                const [x, y] = WEB_FALLBACK_REGION_POSITIONS[item.id];
                 return (
                   <g key={item.id}>
                     <circle
-                      cx={180 + x * 87}
-                      cy={128 - y * 78}
+                      cx={x}
+                      cy={y}
                       r="16"
                       fill={item.id === selected ? "#096d67" : "#fff"}
                     />
                     <text
-                      x={180 + x * 87}
-                      y={133 - y * 78}
+                      x={x}
+                      y={y + 5}
                       textAnchor="middle"
                       fill={item.id === selected ? "#fff" : "#142d31"}
                     >

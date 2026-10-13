@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { MOUTH_REGION_DETAILS } from "@stoma3d/contracts";
+import { MOUTH_REGION_DETAILS, type MouthRegion } from "@stoma3d/contracts";
+import * as mapHelpers from "./web-observation-map";
 import { PerspectiveCamera, Vector3 } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
@@ -48,6 +49,53 @@ describe("browser observation map metadata", () => {
     expect(() => webPinPosition({ ...pin, meshId: "lip_upper" })).toThrow(
       "version",
     );
+  });
+});
+
+describe("browser fallback diagram", () => {
+  it("keeps all eight numbered markers inside the diagram", () => {
+    const positions:
+      Readonly<Record<MouthRegion, readonly [number, number]>> | undefined =
+      Reflect.get(mapHelpers, "WEB_FALLBACK_REGION_POSITIONS");
+    expect(positions).toBeDefined();
+    if (!positions) return;
+    expect(Object.keys(positions)).toHaveLength(8);
+    for (const { id } of MOUTH_REGION_DETAILS) {
+      const [x, y] = positions[id];
+      expect(x).toBeGreaterThanOrEqual(16);
+      expect(x).toBeLessThanOrEqual(344);
+      expect(y).toBeGreaterThanOrEqual(16);
+      expect(y).toBeLessThanOrEqual(264);
+    }
+  });
+
+  it("leaves a visible gap between every pair of numbered markers", () => {
+    const positions:
+      Readonly<Record<MouthRegion, readonly [number, number]>> | undefined =
+      Reflect.get(mapHelpers, "WEB_FALLBACK_REGION_POSITIONS");
+    expect(positions).toBeDefined();
+    if (!positions) return;
+    const markers = MOUTH_REGION_DETAILS.map(({ id }) => positions[id]);
+    for (let index = 0; index < markers.length; index++) {
+      for (const other of markers.slice(index + 1)) {
+        expect(
+          Math.hypot(
+            markers[index][0] - other[0],
+            markers[index][1] - other[1],
+          ),
+        ).toBeGreaterThanOrEqual(40);
+      }
+    }
+  });
+
+  it("uses the flat layout without projecting overlapping 3D surfaces", () => {
+    const source = readFileSync(
+      new URL("../components/scan-observation-map.tsx", import.meta.url),
+      "utf8",
+    );
+    const fallback = source.slice(source.indexOf('{state === "fallback"'));
+    expect(fallback).toContain("WEB_FALLBACK_REGION_POSITIONS[item.id]");
+    expect(fallback).not.toContain("WEB_REGION_POSITIONS[item.id]");
   });
 });
 

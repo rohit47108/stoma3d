@@ -25,6 +25,22 @@ export const WEB_REGION_POSITIONS: Record<
   upper_dental_arch: [0, 0.45, -0.02],
   lower_dental_arch: [0, -0.52, -0.2],
 };
+
+// The flat diagram separates surfaces that overlap in a front-facing 3D view.
+// These display coordinates are not used for stored pins or 3D placement.
+export const WEB_FALLBACK_REGION_POSITIONS: Readonly<
+  Record<MouthRegion, readonly [number, number]>
+> = {
+  dorsal_tongue: [160, 140],
+  ventral_tongue: [208, 176],
+  left_buccal_mucosa: [78, 140],
+  right_buccal_mucosa: [282, 140],
+  upper_lip: [180, 42],
+  lower_lip: [180, 246],
+  upper_dental_arch: [180, 88],
+  lower_dental_arch: [148, 210],
+};
+
 export const WEB_REGION_SCALES: Record<MouthRegion, [number, number, number]> =
   {
     dorsal_tongue: [1.15, 0.72, 0.42],
