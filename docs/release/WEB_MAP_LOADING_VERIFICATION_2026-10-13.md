@@ -57,4 +57,6 @@ Ignored local evidence under `outputs/usability-checks`:
 
 The fallback's region list works, but several diagram numbers overlap; that visual cleanup remains a separate follow-up. Blocking-time variance also remains a performance finding. The Android window was covered by other user activity, so this increment made no native input changes and did not count a new Android journey. Repeated native/accessibility checks, physical cameras, phone HEIC handling, and deferred iPhone testing remain open. Windows WebKit is not iPhone Safari.
 
+The overlapping fallback numbers were subsequently corrected and verified in [the separate diagram release](WEB_FALLBACK_LABEL_VERIFICATION_2026-10-13.md).
+
 The [loading-layout record](WEB_LOADING_VERIFICATION_2026-10-13.md), [repeated scan record](BROWSER_REPEATED_FLOW_VERIFICATION_2026-10-13.md), and [image-quality record](BROWSER_IMAGE_QUALITY_VERIFICATION_2026-10-13.md) retain the separate evidence for earlier increments.
