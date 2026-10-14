@@ -1,5 +1,7 @@
 # Fresh Android scan verification, October 13, 2026
 
+The interrupted second scan and its restart checks subsequently completed in [the October 14 record](./ANDROID_RESUMED_SCAN_VERIFICATION_2026-10-14.md). This record retains the earlier observations and their limits.
+
 One fresh standard eight-region scan completed through the Android app using licensed uploaded mouth photos and the deployed analysis service. This extends [the earlier Android checks](./ANDROID_USABILITY_VERIFICATION_2026-10-13.md); it does not replace physical-phone or repeated-flow testing.
 
 ## Scan and result checks
