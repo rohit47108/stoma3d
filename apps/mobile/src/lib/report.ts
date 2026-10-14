@@ -24,7 +24,11 @@ import {
   observationImageMarkup,
   oralObservationMapMarkup,
 } from "@/lib/reportMarkup";
-import { captureInputLabel, humanizeResultReason } from "@/lib/resultCopy";
+import {
+  captureInputLabel,
+  humanizeResultReason,
+  observationStatusLabel,
+} from "@/lib/resultCopy";
 import { addReportPageFooters } from "@/lib/reportPdf";
 import {
   beginReportTemporaryLease,
@@ -311,7 +315,7 @@ function pinRows(input: ReportInput): string {
       const label =
         MOUTH_REGION_DETAILS.find((region) => region.id === pin.region)
           ?.label ?? pin.region;
-      return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(pin.meshId)}</td><td>${pin.uvX.toFixed(3)}, ${pin.uvY.toFixed(3)}</td><td>${escapeHtml(pin.assetVersion)}</td><td>${escapeHtml(pin.status.replaceAll("_", " "))}</td><td>${pin.captureIds.length}</td></tr>`;
+      return `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(pin.meshId)}</td><td>${pin.uvX.toFixed(3)}, ${pin.uvY.toFixed(3)}</td><td>${escapeHtml(pin.assetVersion)}</td><td>${escapeHtml(observationStatusLabel(pin.status))}</td><td>${pin.captureIds.length}</td></tr>`;
     })
     .join("\n")}</tbody></table>`;
 }

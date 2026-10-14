@@ -14,6 +14,7 @@ import {
   observationReplayIndexForCapture,
 } from "@/lib/observationMap";
 import { animationDurationMs } from "@/lib/motionPreferences";
+import { observationStatusLabel } from "@/lib/resultCopy";
 import { useStoma3DStore } from "@/store/useStoma3DStore";
 import { useAppTheme, useShouldReduceMotion } from "@/theme";
 
@@ -27,11 +28,6 @@ const formatDate = (value: string) =>
     day: "numeric",
     year: "numeric",
   });
-
-const statusLabel = (status: string) =>
-  status === "review_unavailable"
-    ? "Observation saved"
-    : `${status.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase())} observation`;
 
 export default function MapRoute() {
   const theme = useAppTheme();
@@ -407,7 +403,7 @@ export default function MapRoute() {
                 <Pressable
                   key={pin.id}
                   accessibilityRole="button"
-                  accessibilityLabel={`${statusLabel(pin.status)}. First noted ${formatDate(pin.firstObservedAt)}. ${linkedCaptures.length} linked observation${linkedCaptures.length === 1 ? "" : "s"}.`}
+                  accessibilityLabel={`${observationStatusLabel(pin.status)}. First noted ${formatDate(pin.firstObservedAt)}. ${linkedCaptures.length} linked observation${linkedCaptures.length === 1 ? "" : "s"}.`}
                   disabled={!latestCaptureId}
                   onPress={() => {
                     if (!latestCaptureId) return;
@@ -432,7 +428,7 @@ export default function MapRoute() {
                   </View>
                   <View style={styles.pinCopy}>
                     <Text style={[styles.pinTitle, { color: theme.text }]}>
-                      {statusLabel(pin.status)}
+                      {observationStatusLabel(pin.status)}
                     </Text>
                     <Text
                       style={[styles.pinMeta, { color: theme.secondaryText }]}

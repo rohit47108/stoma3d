@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CaptureRecord } from "../src/types";
+import type { CaptureRecord, ObservationPin } from "../src/types";
 
 const boundary = vi.hoisted(() => ({
   print: vi.fn(),
@@ -108,6 +108,34 @@ afterEach(() => {
 });
 
 describe("native report file recovery", () => {
+  it("labels a saved pin clearly while keeping review priority disabled", async () => {
+    boundary.print.mockResolvedValue({
+      uri: "file:///cache/Print/pin-status.pdf",
+    });
+    const pin: ObservationPin = {
+      id: "saved-pin",
+      region: "right_buccal_mucosa",
+      meshId: "buccal_right",
+      uvX: 0.5,
+      uvY: 0.5,
+      assetVersion: "procedural-v1",
+      userConfirmed: true,
+      firstObservedAt: input.session.createdAt,
+      status: "review_unavailable",
+      captureIds: ["confirmed-photo"],
+    };
+
+    await generateEncryptedObservationReport({ ...input, pins: [pin] });
+
+    const html = boundary.print.mock.calls[0][0].html as string;
+    expect(html).toContain("<td>Observation saved</td>");
+    expect(html).not.toContain("<td>review unavailable</td>");
+    expect(html).toContain(
+      "<strong>Review priority:</strong> disabled / unavailable",
+    );
+    expect(pin.status).toBe("review_unavailable");
+  });
+
   it.each([
     ["live_capture", "photo_library", "Uploaded photo"],
     ["live_capture", "camera", "Camera photo"],

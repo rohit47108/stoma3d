@@ -117,6 +117,8 @@ vi.mock("@/theme", () => ({
   useShouldReduceMotion: () => true,
 }));
 
+vi.mock("@/lib/resultCopy", () => import("../src/lib/resultCopy"));
+
 import MapRoute from "../app/(tabs)/map";
 
 const record = (id: string, date: string): CaptureRecord => ({

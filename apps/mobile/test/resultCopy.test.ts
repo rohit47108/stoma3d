@@ -7,7 +7,23 @@ import {
   historyInputLabel,
   historyResultDescription,
   humanizeResultReason,
+  observationStatusLabel,
 } from "../src/lib/resultCopy";
+
+describe("observationStatusLabel", () => {
+  it.each([
+    ["review_unavailable", "Observation saved"],
+    ["monitoring", "Monitoring observation"],
+    ["retake_required", "Retake required observation"],
+    ["stable", "Stable observation"],
+    ["visually_changed", "Visually changed observation"],
+  ] as const)(
+    "labels %s consistently without changing its stored meaning",
+    (status, expected) => {
+      expect(observationStatusLabel(status)).toBe(expected);
+    },
+  );
+});
 
 describe("humanizeResultReason", () => {
   it("explains release-gated analysis in plain language", () => {

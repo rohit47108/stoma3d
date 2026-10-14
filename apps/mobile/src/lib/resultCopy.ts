@@ -1,5 +1,5 @@
 import type { AnalysisResult, AnalysisStatus } from "@stoma3d/contracts";
-import type { CaptureRecord } from "../types";
+import type { CaptureRecord, ObservationPin } from "../types";
 
 const RESULT_REASON_COPY: Readonly<Record<string, string>> = {
   image_too_small: "The image is too small to evaluate reliably.",
@@ -142,6 +142,14 @@ export function captureInputLabel(
         : capture.captureSource === "video_sweep"
           ? "Video frame"
           : "Photo";
+}
+
+export function observationStatusLabel(
+  status: ObservationPin["status"],
+): string {
+  return status === "review_unavailable"
+    ? "Observation saved"
+    : `${status.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase())} observation`;
 }
 
 export function historyInputLabel(
