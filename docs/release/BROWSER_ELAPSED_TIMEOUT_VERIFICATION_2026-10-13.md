@@ -2,6 +2,8 @@
 
 The browser app stops waiting after its 115-second deadline and keeps the photo available for retry. Chromium and Firefox completed the first real retry. Windows WebKit reported a connection error on its first retry, then completed the next retry without another upload. This record distinguishes timeout handling from network recovery; it does not establish physical-phone behavior.
 
+The [October 14 retry correction](./WEB_ANALYSIS_RETRY_VERIFICATION_2026-10-14.md) adds one bounded automatic transport recovery. This earlier record describes the behavior before that change.
+
 ## Deployed source and test setup
 
 The checks used [the public scan workspace](https://stoma3d.vercel.app/scan) at commit `bf3de22152dda4ce6db7495a16ab7ae2ff24bb58`. Vercel deployment `dpl_8M95Ph6kFjRWkc9Z1TxiRa9o8yho` was READY and owned that alias. Its application source matches the preceding `f75779dcd8ddc70a8079d5a04ee0e91a0872a1a2` release; the intervening commit changed documentation only.
