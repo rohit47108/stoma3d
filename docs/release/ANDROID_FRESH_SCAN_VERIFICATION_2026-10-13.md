@@ -56,6 +56,18 @@ The ready 6:30:35 report survived installation. Update report generated a new pr
 
 ARM64 is a successful build, not a physical-phone runtime check. The release check did not replace or redeploy inference models. No web, inference, dependency, or environment configuration changed in this increment.
 
+## Second scan and simulator recovery
+
+A second scan began at approximately 7:12 AM. Picker cancellation and reopening retained the scan. A rotated, cropped top-of-tongue photo completed analysis, and its partial map showed 1/8 without the older scan's pin. The underside-of-tongue photo also completed.
+
+Two camera-switch actions reopened their previews. Read-only Android camera diagnostics showed one active Stoma3D camera client per switch, using camera IDs 10 and 1. These are virtual cameras, not physical-phone focus, mirroring, or exposure checks.
+
+The left-cheek photo completed real analysis with no candidate outline, then Next region advanced to the right cheek. The right-cheek photo reached review but was not analyzed before testing was interrupted. This second scan is not a completed eight-region run.
+
+Later, the simulator process stopped. Android Studio started and exited without exposing a usable window; its underlying startup fault remains unresolved. The existing Android SDK launcher opened the same `Stoma3D_Verify_20261010` device with its existing data partition and no wipe option. Android reported boot completion after 118516 ms. The [Android emulator documentation](https://developer.android.com/studio/run/emulator-commandline#startup-options) distinguishes startup and snapshot options from data deletion.
+
+Computer controls stopped when the owner pressed Escape, before the saved Stoma3D session could be reopened. This boot check does not prove the second scan survived restart. No subsequent native input bypassed that stop.
+
 ## Remaining coverage
 
 This record proves one new complete uploaded-image simulator scan, not ten consecutive native flows. Repeated runs, degraded inputs, recovery and native accessibility checks remain. Physical camera focus, switching, interruption, and iPhone HEIC behavior require device testing. iPhone testing remains deferred by the user. No iOS binary, store release, physical Android runtime, or all-platform release sign-off is claimed.
