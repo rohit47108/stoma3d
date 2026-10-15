@@ -823,194 +823,208 @@ export function OralObservationMap({
         style={[
           styles.shell,
           {
-            height: mapHeight,
             backgroundColor: theme.navy,
             borderColor: theme.border,
           },
         ]}
       >
-        <MapRenderBoundary
-          key={renderAttempt}
-          onError={() => setRenderUnavailable(true)}
-          fallback={
-            <View accessible={false} style={styles.renderFallback}>
-              <View
-                accessible
-                accessibilityRole="alert"
-                accessibilityLabel="3D map unavailable. Use the named region list below or retry the 3D view."
-                style={styles.renderFallbackCopy}
-              >
-                <Ionicons
-                  accessible={false}
-                  name="cube-outline"
-                  size={32}
-                  color={theme.onCamera}
-                />
-                <Text
-                  style={[
-                    styles.renderFallbackTitle,
-                    { color: theme.onCamera },
+        {/* Keep control hit areas outside the scene so they cannot intercept pins. */}
+        <View style={{ height: mapHeight }}>
+          <MapRenderBoundary
+            key={renderAttempt}
+            onError={() => setRenderUnavailable(true)}
+            fallback={
+              <View accessible={false} style={styles.renderFallback}>
+                <View
+                  accessible
+                  accessibilityRole="alert"
+                  accessibilityLabel="3D map unavailable. Use the named region list below or retry the 3D view."
+                  style={styles.renderFallbackCopy}
+                >
+                  <Ionicons
+                    accessible={false}
+                    name="cube-outline"
+                    size={32}
+                    color={theme.onCamera}
+                  />
+                  <Text
+                    style={[
+                      styles.renderFallbackTitle,
+                      { color: theme.onCamera },
+                    ]}
+                  >
+                    3D view unavailable
+                  </Text>
+                  <Text
+                    style={[
+                      styles.renderFallbackBody,
+                      { color: theme.onCamera },
+                    ]}
+                  >
+                    The named region list has the same selections and
+                    observation details.
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Retry 3D view"
+                  onPress={() => {
+                    setRenderUnavailable(false);
+                    setRenderAttempt((value) => value + 1);
+                  }}
+                  style={({ pressed }) => [
+                    styles.renderRetry,
+                    { borderColor: theme.onCamera },
+                    pressed && styles.renderRetryPressed,
                   ]}
                 >
-                  3D view unavailable
+                  <Ionicons
+                    accessible={false}
+                    name="refresh"
+                    size={18}
+                    color={theme.onCamera}
+                  />
+                  <Text
+                    style={[styles.renderRetryText, { color: theme.onCamera }]}
+                  >
+                    Retry 3D view
+                  </Text>
+                </Pressable>
+              </View>
+            }
+          >
+            <View
+              accessible={false}
+              importantForAccessibility="no-hide-descendants"
+              style={styles.canvas}
+            >
+              <Canvas camera={{ position: [0, 0, zoom], fov: 46 }}>
+                <CameraRig
+                  zoom={focusedRegion ? 2.9 : zoom}
+                  focusedRegion={focusedRegion}
+                />
+                <ambientLight intensity={1.55} />
+                <directionalLight position={[2, 3, 4]} intensity={2.25} />
+                <directionalLight position={[-2, -1, 2]} intensity={0.55} />
+                <group rotation={[0.06, rotation, 0]}>
+                  <MouthAnatomySupport
+                    exploded={exploded}
+                    showTeeth={showTeeth}
+                    translucent={tissueTranslucent}
+                  />
+                  {MOUTH_REGION_DETAILS.map((detail) => (
+                    <RegionMesh
+                      key={detail.id}
+                      id={detail.id}
+                      meshId={detail.meshId}
+                      position={deriveRegionWorldPosition(detail.id, exploded)}
+                      scale={REGION_SCALES[detail.id]}
+                      color={colorFor(detail.id)}
+                      opacity={opacityFor(detail.id)}
+                      selected={selectedRegion === detail.id}
+                      onSelect={onSelectRegion}
+                    />
+                  ))}
+                  {validPins.map((pin) => (
+                    <mesh
+                      key={pin.id}
+                      name={`pin-${pin.id}`}
+                      position={derivePinWorldPosition(pin, exploded)}
+                      scale={selectedRegion === pin.region ? 1.2 : 1}
+                      onClick={() => onSelectRegion(pin.region)}
+                    >
+                      <sphereGeometry args={[0.105, 18, 18]} />
+                      <meshStandardMaterial
+                        color={theme.pin}
+                        emissive={theme.amber}
+                        emissiveIntensity={0.32}
+                      />
+                    </mesh>
+                  ))}
+                  {view === "path" && selectedRegion ? (
+                    <ScanPhoneCue
+                      region={selectedRegion}
+                      reducedMotion={reduceMotion}
+                      frameColor={theme.onCamera}
+                      screenColor={theme.pin}
+                    />
+                  ) : null}
+                </group>
+              </Canvas>
+            </View>
+          </MapRenderBoundary>
+          {!renderUnavailable ? (
+            <>
+              <View pointerEvents="none" style={styles.mapReadout}>
+                <Text
+                  style={[styles.mapReadoutLabel, { color: theme.onCamera }]}
+                >
+                  {view === "path" && pathIndex >= 0
+                    ? `Step ${pathIndex + 1} of 8`
+                    : layer === "confidence"
+                      ? "Analysis confidence"
+                      : layer === "status"
+                        ? "Personal scan status"
+                        : "Capture coverage"}
                 </Text>
                 <Text
-                  style={[styles.renderFallbackBody, { color: theme.onCamera }]}
+                  style={[styles.mapReadoutTitle, { color: theme.onCamera }]}
                 >
-                  The named region list has the same selections and observation
-                  details.
+                  {selectedDetail?.shortLabel ?? "All named regions"}
                 </Text>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Retry 3D view"
-                onPress={() => {
-                  setRenderUnavailable(false);
-                  setRenderAttempt((value) => value + 1);
-                }}
-                style={({ pressed }) => [
-                  styles.renderRetry,
-                  { borderColor: theme.onCamera },
-                  pressed && styles.renderRetryPressed,
-                ]}
-              >
-                <Ionicons
-                  accessible={false}
-                  name="refresh"
-                  size={18}
-                  color={theme.onCamera}
-                />
-                <Text
-                  style={[styles.renderRetryText, { color: theme.onCamera }]}
-                >
-                  Retry 3D view
-                </Text>
-              </Pressable>
-            </View>
-          }
-        >
-          <View
-            accessible={false}
-            importantForAccessibility="no-hide-descendants"
-            style={styles.canvas}
-          >
-            <Canvas camera={{ position: [0, 0, zoom], fov: 46 }}>
-              <CameraRig
-                zoom={focusedRegion ? 2.9 : zoom}
-                focusedRegion={focusedRegion}
-              />
-              <ambientLight intensity={1.55} />
-              <directionalLight position={[2, 3, 4]} intensity={2.25} />
-              <directionalLight position={[-2, -1, 2]} intensity={0.55} />
-              <group rotation={[0.06, rotation, 0]}>
-                <MouthAnatomySupport
-                  exploded={exploded}
-                  showTeeth={showTeeth}
-                  translucent={tissueTranslucent}
-                />
-                {MOUTH_REGION_DETAILS.map((detail) => (
-                  <RegionMesh
-                    key={detail.id}
-                    id={detail.id}
-                    meshId={detail.meshId}
-                    position={deriveRegionWorldPosition(detail.id, exploded)}
-                    scale={REGION_SCALES[detail.id]}
-                    color={colorFor(detail.id)}
-                    opacity={opacityFor(detail.id)}
-                    selected={selectedRegion === detail.id}
-                    onSelect={onSelectRegion}
-                  />
-                ))}
-                {validPins.map((pin) => (
-                  <mesh
-                    key={pin.id}
-                    name={`pin-${pin.id}`}
-                    position={derivePinWorldPosition(pin, exploded)}
-                    scale={selectedRegion === pin.region ? 1.2 : 1}
-                    onClick={() => onSelectRegion(pin.region)}
-                  >
-                    <sphereGeometry args={[0.105, 18, 18]} />
-                    <meshStandardMaterial
-                      color={theme.pin}
-                      emissive={theme.amber}
-                      emissiveIntensity={0.32}
+              <View pointerEvents="box-none" style={styles.legend}>
+                {layer === "coverage" ? (
+                  <>
+                    <LegendItem color={theme.aqua} label="Captured" />
+                    <LegendItem color={theme.border} label="Not captured" />
+                  </>
+                ) : layer === "status" ? (
+                  <>
+                    <LegendItem color={theme.danger} label="Visually changed" />
+                    <LegendItem color={theme.pin} label="Confirmed area" />
+                    <LegendItem color={theme.mapPending} label="Needs retake" />
+                    <LegendItem color={theme.aqua} label="Captured" />
+                    <LegendItem color={theme.border} label="Not captured" />
+                  </>
+                ) : (
+                  <>
+                    <LegendItem color={theme.aqua} label="High" />
+                    <LegendItem color={theme.onCamera} label="Unavailable" />
+                    <LegendItem
+                      color={theme.warningOnCamera}
+                      label="Moderate"
                     />
-                  </mesh>
-                ))}
-                {view === "path" && selectedRegion ? (
-                  <ScanPhoneCue
-                    region={selectedRegion}
-                    reducedMotion={reduceMotion}
-                    frameColor={theme.onCamera}
-                    screenColor={theme.pin}
-                  />
-                ) : null}
-              </group>
-            </Canvas>
-          </View>
-        </MapRenderBoundary>
+                    <LegendItem color={theme.mapPending} label="Lower" />
+                  </>
+                )}
+              </View>
+            </>
+          ) : null}
+        </View>
         {!renderUnavailable ? (
-          <>
-            <View pointerEvents="none" style={styles.mapReadout}>
-              <Text style={[styles.mapReadoutLabel, { color: theme.onCamera }]}>
-                {view === "path" && pathIndex >= 0
-                  ? `Step ${pathIndex + 1} of 8`
-                  : layer === "confidence"
-                    ? "Analysis confidence"
-                    : layer === "status"
-                      ? "Personal scan status"
-                      : "Capture coverage"}
-              </Text>
-              <Text style={[styles.mapReadoutTitle, { color: theme.onCamera }]}>
-                {selectedDetail?.shortLabel ?? "All named regions"}
-              </Text>
-            </View>
-            <View pointerEvents="box-none" style={styles.legend}>
-              {layer === "coverage" ? (
-                <>
-                  <LegendItem color={theme.aqua} label="Captured" />
-                  <LegendItem color={theme.border} label="Not captured" />
-                </>
-              ) : layer === "status" ? (
-                <>
-                  <LegendItem color={theme.danger} label="Visually changed" />
-                  <LegendItem color={theme.pin} label="Confirmed area" />
-                  <LegendItem color={theme.mapPending} label="Needs retake" />
-                  <LegendItem color={theme.aqua} label="Captured" />
-                  <LegendItem color={theme.border} label="Not captured" />
-                </>
-              ) : (
-                <>
-                  <LegendItem color={theme.aqua} label="High" />
-                  <LegendItem color={theme.onCamera} label="Unavailable" />
-                  <LegendItem color={theme.warningOnCamera} label="Moderate" />
-                  <LegendItem color={theme.mapPending} label="Lower" />
-                </>
-              )}
-            </View>
-            <View style={styles.controls}>
-              <MapControl
-                label="Rotate left"
-                icon="arrow-back"
-                onPress={() => setRotation((value) => value - 0.35)}
-              />
-              <MapControl
-                label="Rotate right"
-                icon="arrow-forward"
-                onPress={() => setRotation((value) => value + 0.35)}
-              />
-              <MapControl
-                label="Zoom in"
-                icon="add"
-                onPress={() => setZoom((value) => Math.max(3.4, value - 0.4))}
-              />
-              <MapControl
-                label="Zoom out"
-                icon="remove"
-                onPress={() => setZoom((value) => Math.min(6, value + 0.4))}
-              />
-            </View>
-          </>
+          <View style={styles.controls}>
+            <MapControl
+              label="Rotate left"
+              icon="arrow-back"
+              onPress={() => setRotation((value) => value - 0.35)}
+            />
+            <MapControl
+              label="Rotate right"
+              icon="arrow-forward"
+              onPress={() => setRotation((value) => value + 0.35)}
+            />
+            <MapControl
+              label="Zoom in"
+              icon="add"
+              onPress={() => setZoom((value) => Math.max(3.4, value - 0.4))}
+            />
+            <MapControl
+              label="Zoom out"
+              icon="remove"
+              onPress={() => setZoom((value) => Math.min(6, value + 0.4))}
+            />
+          </View>
         ) : null}
       </View>
 
@@ -1645,10 +1659,9 @@ const styles = StyleSheet.create({
   legendText: { fontSize: 10, fontWeight: "700" },
   dot: { width: 8, height: 8, borderRadius: 4 },
   controls: {
-    position: "absolute",
-    bottom: 12,
-    left: 12,
-    right: 12,
+    height: 72,
+    flexShrink: 0,
+    padding: 12,
     flexDirection: "row",
     justifyContent: "center",
     gap: 8,
