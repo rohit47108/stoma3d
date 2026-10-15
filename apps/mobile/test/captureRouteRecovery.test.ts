@@ -534,6 +534,128 @@ afterEach(() => {
 });
 
 describe("native capture recovery wiring", () => {
+  it.each([
+    ["image_too_blurry", "The image is too blurry."],
+    ["exposure_out_of_range", "The image is too dark or too bright."],
+    ["excessive_glare", "Reflections cover too much of the image."],
+    ["image_too_small", "The image is too small to evaluate reliably."],
+    ["face_detected", "A face or identifying facial area was detected."],
+  ])(
+    "handles a verified %s rejection before unavailable model output",
+    async (reason, expectedMessage) => {
+      await choosePhoto();
+      confirmPhoto();
+      const rejected = analysis("dorsal_tongue");
+      runtime.analyze.mockResolvedValueOnce({
+        ...rejected,
+        quality: {
+          ...rejected.quality,
+          accepted: false,
+          faceDetected: reason === "face_detected",
+          reasons: [reason],
+        },
+        anatomyPrediction: {
+          region: null,
+          confidence: 0,
+          supported: false,
+          selectedRegionMatches: false,
+        },
+        analysisOrigin: "unavailable",
+        status: "abstained",
+        abstentionReasons: [reason],
+      });
+
+      control("Use photo").props.onPress!();
+      await settle();
+
+      expect(runtime.store.captureDrafts).toEqual([]);
+      expect(runtime.store.captures).toEqual([]);
+      expect(runtime.addCaptures).not.toHaveBeenCalled();
+      expect(runtime.navigate).not.toHaveBeenCalled();
+      expect(previewUri()).toBe(photo.uri);
+      const messages = nodes(renderRoute())
+        .map((node) => node.props.children)
+        .filter((text): text is string => typeof text === "string");
+      expect(
+        messages.filter((text) => text.startsWith(expectedMessage)),
+      ).toHaveLength(1);
+      expect(messages).not.toContain(reason);
+      expect(messages.join(" ")).not.toContain(
+        "mouth region could not be confirmed",
+      );
+      expect(control("Choose another").props.disabled).toBe(false);
+    },
+  );
+
+  it.each(["analysis_unavailable", "face_check_unavailable"])(
+    "keeps the encrypted retry draft for %s without misreporting blur",
+    async (reason) => {
+      await choosePhoto();
+      confirmPhoto();
+      const result = analysis("dorsal_tongue");
+      runtime.analyze.mockResolvedValueOnce({
+        ...result,
+        quality: { ...result.quality, accepted: false, reasons: [reason] },
+        anatomyPrediction: {
+          region: null,
+          confidence: 0,
+          supported: false,
+          selectedRegionMatches: false,
+        },
+        analysisOrigin: "unavailable",
+        status: "failed",
+        abstentionReasons: [reason],
+      });
+      control("Use photo").props.onPress!();
+      await settle();
+      expect(runtime.store.captureDrafts).toHaveLength(1);
+      expect(runtime.removeDraft).not.toHaveBeenCalled();
+      expect(runtime.addCaptures).not.toHaveBeenCalled();
+      expect(runtime.navigate).not.toHaveBeenCalled();
+      expect(previewUri()).toBe(photo.uri);
+      expect(control("Use photo").props.disabled).toBe(false);
+      const messages = nodes(renderRoute())
+        .map((node) => node.props.children)
+        .filter((text): text is string => typeof text === "string");
+      expect(messages).not.toContain(reason);
+      expect(messages.join(" ")).not.toContain("blurry");
+      expect(messages.join(" ")).not.toContain(
+        "mouth region could not be confirmed",
+      );
+    },
+  );
+
+  it("accepts a clear replacement after a measured quality rejection", async () => {
+    await choosePhoto();
+    confirmPhoto();
+    const result = analysis("dorsal_tongue");
+    runtime.analyze.mockResolvedValueOnce({
+      ...result,
+      quality: {
+        ...result.quality,
+        accepted: false,
+        reasons: ["image_too_blurry"],
+      },
+      analysisOrigin: "unavailable",
+      status: "abstained",
+      abstentionReasons: ["image_too_blurry"],
+    });
+    control("Use photo").props.onPress!();
+    await settle();
+    expect(runtime.store.captureDrafts).toEqual([]);
+    control("Choose another").props.onPress!();
+    await settle();
+    confirmPhoto();
+    control("Use photo").props.onPress!();
+    await settle();
+    expect(runtime.addCaptures).toHaveBeenCalledOnce();
+    expect(runtime.navigate).toHaveBeenCalledWith({
+      pathname: "/result/[captureId]",
+      params: { captureId: "fixture-capture" },
+    });
+    expect(runtime.store.captureDrafts).toEqual([]);
+  });
+
   it.each(["selected", "canceled"])(
     "does not report a cleared photo when an empty Android picker is %s",
     async (outcome) => {

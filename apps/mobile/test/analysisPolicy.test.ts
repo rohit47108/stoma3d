@@ -235,6 +235,40 @@ describe("protected capture storage acceptance", () => {
     ).toBe("preserve");
   });
 
+  it("rejects measured blur even when no learned model output was produced", () => {
+    const result = analysis({
+      analysisOrigin: "unavailable",
+      anatomySupported: false,
+      predictedRegion: null,
+      qualityAccepted: false,
+      status: "abstained",
+    });
+    result.quality.reasons = ["image_too_blurry"];
+    expect(captureAnalysisRetryDisposition(result, "left_buccal_mucosa")).toBe(
+      "reject",
+    );
+    expect(
+      captureStorageRejectionReasons(result, "left_buccal_mucosa"),
+    ).toEqual(["image_too_blurry"]);
+  });
+
+  it.each(["analysis_unavailable", "face_check_unavailable"])(
+    "preserves the retry photo when %s is not an image measurement",
+    (reason) => {
+      const result = analysis({
+        analysisOrigin: "unavailable",
+        anatomySupported: false,
+        predictedRegion: null,
+        qualityAccepted: false,
+        status: reason === "analysis_unavailable" ? "failed" : "abstained",
+      });
+      result.quality.reasons = [reason];
+      expect(
+        captureAnalysisRetryDisposition(result, "left_buccal_mucosa"),
+      ).toBe("preserve");
+    },
+  );
+
   it("rejects a verified retry response with unsupported anatomy", () => {
     expect(
       captureAnalysisRetryDisposition(

@@ -31,6 +31,7 @@ import {
 } from "@/components/captureGuidance";
 import { Button, Card, ChoiceChip } from "@/components/Ui";
 import {
+  captureAnalysisRetryDisposition,
   captureRegionCorrection,
   captureStorageRejectionReasons,
 } from "@/lib/analysisPolicy";
@@ -1135,17 +1136,11 @@ export default function CaptureRoute() {
           localQuality: prepared.quality,
         });
         if (!lifecycle.current.isReviewCurrent(token)) return;
-        if (analysis.analysisOrigin === "unavailable") {
-          throw new Error(
-            analysis.abstentionReasons[0] ??
-              "Analysis could not finish. Your photo is still here. Try again.",
-          );
-        }
         const serverRejectionReasons = captureStorageRejectionReasons(
           analysis,
           region,
         );
-        if (serverRejectionReasons.length > 0) {
+        if (captureAnalysisRetryDisposition(analysis, region) === "reject") {
           if (draftEncryptedUri) {
             await removeCaptureDraft(captureId);
             if (!lifecycle.current.isReviewCurrent(token)) return;
@@ -1167,14 +1162,22 @@ export default function CaptureRoute() {
             }),
           );
           setRejectedGuidance(prepared.guidance);
+          return;
+        }
+        if (analysis.analysisOrigin === "unavailable") {
           throw new Error(
-            serverRejectionReasons.map(humanizeResultReason).join(" "),
+            humanizeResultReason(
+              analysis.abstentionReasons[0] ??
+                "Analysis could not finish. Your photo is still here. Try again.",
+            ),
           );
         }
         if (analysis.status === "failed")
           throw new Error(
-            analysis.abstentionReasons[0] ??
-              "Analysis could not finish. Your photo is still here. Try again.",
+            humanizeResultReason(
+              analysis.abstentionReasons[0] ??
+                "Analysis could not finish. Your photo is still here. Try again.",
+            ),
           );
         // Server privacy, quality, identity and signature checks have passed.
         const encryptedUri =
