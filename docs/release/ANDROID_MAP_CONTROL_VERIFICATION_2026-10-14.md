@@ -49,6 +49,16 @@ Both Android packages contain the same compiled bundle, SHA-256 `c4083e94d05503a
 - Android release builds for x86_64 and arm64-v8a, plus iOS JavaScript export: passed.
 - Web production build: passed with the documented `STOMA3D_WEB_MODE=public` setting. An initial command without that setting correctly failed hosted-mode validation for missing platform configuration; validation was not weakened.
 
-GitHub's [repository safety audit](https://github.com/rohit47108/stoma3d/actions/runs/38678028223) passed for this commit. The corresponding Vercel deployment, `dpl_7RgJHHrF8tRdtMQxZBwhrNJVwPTd`, reached READY in production. That deployment status is not additional browser or native runtime evidence; this change is mobile-only.
+GitHub's [repository safety audit](https://github.com/rohit47108/stoma3d/actions/runs/38678028223) and [TypeScript checks](https://github.com/rohit47108/stoma3d/actions/runs/38678028398) passed for this commit. The corresponding Vercel deployment, `dpl_7RgJHHrF8tRdtMQxZBwhrNJVwPTd`, reached READY in production. That deployment status is not additional browser or native runtime evidence; this change is mobile-only.
+
+## Repeated report follow-up
+
+Five consecutive Update report actions completed on the same saved eight-region scan and the updated package, without restarting the app between attempts. Each returned to Report ready with a new generated timestamp and enabled export/update controls. The displayed times on October 14 were 11:49:41 PM, 11:49:58 PM, 11:50:34 PM, 11:51:07 PM, and 11:51:43 PM.
+
+The completed states were observed within 9, 24, 25, 26, and 25 seconds of each action, respectively. These are observation bounds, not measured renderer durations. No new app crash or print error appeared in the filtered logs.
+
+Exporting the fifth report opened Android's share sheet and an 11-page Print preview. Its first page and observation-map page rendered; no cloud recipient or printer was selected. This was a preview check, not another complete visual review of all 11 pages. The report markup was unchanged from the earlier all-page review.
+
+These five successful updates do not prove the earlier intermittent timeout is fixed. No speculative renderer patch, timeout increase, or dependency upgrade was made. They also do not count as five complete scan journeys.
 
 Remaining release checks still include repeated native flows, the native error/accessibility matrix, physical cameras, and iPhone runtime testing. A built package or passing simulator check does not substitute for those checks.
