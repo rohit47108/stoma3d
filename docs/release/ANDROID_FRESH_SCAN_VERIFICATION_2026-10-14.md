@@ -35,6 +35,8 @@ The right-cheek and upper-arch suggestions remained unconfirmed. Confirming the 
 
 Rotation changed the rendered view. Selecting the lower-lip pin selected that region; its Observation saved link reopened the matching new photo and approximate 11.2% outline. The selected-region panel showed one accepted photo and one linked observation. The lower-lip pin sits close to the bottom rotation/zoom controls: an initial attempted selection activated rotation, while selecting its upper portion selected the pin. Larger separation or hit-target review remains part of native usability testing.
 
+The overlap was subsequently [fixed and checked on the updated Android package](./ANDROID_MAP_CONTROL_VERIFICATION_2026-10-14.md). The original observation above describes the earlier package.
+
 ## Report generation and export
 
 The new scan's first report generation completed at 7:12:00 AM without a timeout. Export opened Android's share sheet; Print showed an 11-page preview. Save as PDF created `downloadfile (5).pdf` without replacing older exports. Saving returned to the app's report screen.
