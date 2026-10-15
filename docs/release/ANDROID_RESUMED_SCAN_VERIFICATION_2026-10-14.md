@@ -64,4 +64,6 @@ The same source commit produced Vercel deployment `dpl_4Gxs2rgo5oPpZkT3cTSP8KXAt
 
 ## Remaining device coverage
 
+The updated package subsequently completed [a fresh eight-region scan and restart check](./ANDROID_FRESH_SCAN_VERIFICATION_2026-10-14.md). That record adds upload, picker-cancellation, map-link, and stored-report evidence without changing this resumed flow's scope.
+
 This is one completed resumed scan, not ten consecutive fresh native flows. Native repetition, degraded-image and recovery checks, accessibility, and physical-phone camera testing remain. iPhone testing and native signing remain deferred. These results do not establish patient-level accuracy or an all-platform release sign-off.
