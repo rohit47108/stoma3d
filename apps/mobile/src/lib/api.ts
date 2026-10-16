@@ -88,10 +88,10 @@ function uploadPart(uri: string): LocalFile {
   return new LocalFile(uri);
 }
 
-async function fetchWithTimeout(
+async function fetchVerifiedJsonWithTimeout(
   url: string,
   init: RequestInit,
-): Promise<{ requestId: string; response: Response }> {
+): Promise<unknown> {
   const transport = enforceApiTransport(url);
   const pinnedPublicKey =
     process.env.EXPO_PUBLIC_RESPONSE_SIGNING_PUBLIC_KEY_B64?.trim();
@@ -101,60 +101,71 @@ async function fetchWithTimeout(
       "A pinned response signing public key is required outside loopback development.",
     );
   }
-  if (!transport.isLoopback) {
-    const networkState = await Network.getNetworkStateAsync().catch(() => null);
-    if (
-      networkState &&
-      (networkState.isConnected === false ||
-        networkState.isInternetReachable === false)
-    ) {
-      throw new ApiRequestError(
-        "offline",
-        "You're offline. Your photo is still here. Reconnect and try again.",
-      );
-    }
-  }
   const requestId = Crypto.randomUUID();
   const headers = new Headers(init.headers);
   headers.set("X-Request-ID", requestId);
   const controller = new AbortController();
   const externalSignal = init.signal;
-  const abortFromCaller = () => controller.abort();
-  if (externalSignal?.aborted) controller.abort();
+  let rejectInterruption!: (error: Error) => void;
+  const interruption = new Promise<never>((_resolve, reject) => {
+    rejectInterruption = reject;
+  });
+  const abortFromCaller = () => {
+    const error = new Error("Analysis request cancelled.");
+    error.name = "AbortError";
+    rejectInterruption(error);
+    controller.abort();
+  };
   externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
-  let timedOut = false;
   const timeout = setTimeout(() => {
-    timedOut = true;
+    rejectInterruption(
+      new ApiRequestError(
+        "timeout",
+        "Analysis took too long. Your photo is still here. Try again.",
+      ),
+    );
     controller.abort();
   }, REQUEST_TIMEOUT_MS);
   try {
-    try {
-      const response = await fetch(url, {
-        ...init,
-        headers,
-        signal: controller.signal,
-      });
-      return { requestId, response };
-    } catch (error) {
-      if (__DEV__) {
-        console.warn(
-          "[Stoma3D] Analysis transport failed before a response was received.",
-          error,
+    if (externalSignal?.aborted) abortFromCaller();
+    const request = async () => {
+      if (!transport.isLoopback && !controller.signal.aborted) {
+        const networkState = await Network.getNetworkStateAsync().catch(
+          () => null,
         );
+        if (
+          networkState &&
+          (networkState.isConnected === false ||
+            networkState.isInternetReachable === false)
+        ) {
+          throw new ApiRequestError(
+            "offline",
+            "You're offline. Your photo is still here. Reconnect and try again.",
+          );
+        }
       }
-      if (timedOut) {
+      if (controller.signal.aborted) return;
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          ...init,
+          headers,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
         throw new ApiRequestError(
-          "timeout",
-          "Analysis took too long. Your photo is still here. Try again.",
+          "network",
+          "The analysis service could not be reached. Check the service address and your connection, then retry.",
         );
       }
-      if (externalSignal?.aborted) throw error;
-      if (error instanceof ApiRequestError) throw error;
-      throw new ApiRequestError(
-        "network",
-        "The analysis service could not be reached. Check the service address and your connection, then retry.",
-      );
-    }
+      if (controller.signal.aborted) return;
+      return secureJsonBody(response, url, requestId);
+    };
+    // Abort covers response bodies as well as headers; race also bounds a
+    // native transport that does not settle after aborting.
+    // https://developer.mozilla.org/en-US/docs/Web/API/AbortController/abort
+    return await Promise.race([interruption, request()]);
   } finally {
     clearTimeout(timeout);
     externalSignal?.removeEventListener("abort", abortFromCaller);
@@ -301,14 +312,12 @@ export async function analyzeCapture(
     );
     form.append("metadata", JSON.stringify(metadata));
 
-    const { requestId, response } = await fetchWithTimeout(endpoint, {
+    const body = await fetchVerifiedJsonWithTimeout(endpoint, {
       method: "POST",
       headers: { Accept: "application/json" },
       body: form,
     });
-    const result = analysisResultSchema
-      .strict()
-      .parse(await secureJsonBody(response, endpoint, requestId));
+    const result = analysisResultSchema.strict().parse(body);
     if (
       result.captureId !== input.captureId ||
       result.region !== input.selectedRegion ||
@@ -371,14 +380,12 @@ export async function compareCaptures(
 
   const endpoint = apiEndpoint("/v1/compare");
   try {
-    const { requestId, response } = await fetchWithTimeout(endpoint, {
+    const body = await fetchVerifiedJsonWithTimeout(endpoint, {
       method: "POST",
       headers: { Accept: "application/json" },
       body: form,
     });
-    const result = comparisonResultSchema
-      .strict()
-      .parse(await secureJsonBody(response, endpoint, requestId));
+    const result = comparisonResultSchema.strict().parse(body);
     assertComparisonResult(result, expectedIdentity);
     assertLiveResultOrigin(result.analysisOrigin);
     return result;
@@ -423,12 +430,10 @@ export async function compareCaptures(
 
 export async function fetchModelCard(signal?: AbortSignal): Promise<ModelCard> {
   const endpoint = apiEndpoint("/v1/model-card");
-  const { requestId, response } = await fetchWithTimeout(endpoint, {
+  const body = await fetchVerifiedJsonWithTimeout(endpoint, {
     method: "GET",
     headers: { Accept: "application/json" },
     signal,
   });
-  return modelCardSchema
-    .strict()
-    .parse(await secureJsonBody(response, endpoint, requestId));
+  return modelCardSchema.strict().parse(body);
 }
