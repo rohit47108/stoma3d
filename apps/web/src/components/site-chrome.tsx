@@ -10,9 +10,11 @@ const PRODUCT_PREFIXES = ["/app", "/scan", "/clinician", "/shared", "/signin"];
 
 export function SiteChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const productRoute = PRODUCT_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+  const productRoute =
+    pathname === "/" ||
+    PRODUCT_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
 
   if (productRoute) return <>{children}</>;
   return (

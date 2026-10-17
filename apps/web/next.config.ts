@@ -47,6 +47,7 @@ const nextConfig: NextConfig = {
         headers: securityHeaders,
       },
       ...[
+        "/",
         "/app/:path*",
         "/clinician/:path*",
         "/shared/:path*",

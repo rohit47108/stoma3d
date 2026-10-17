@@ -42,11 +42,11 @@ export const viewport: Viewport = {
 };
 
 const directionContract = `<!--
-THESIS: The fixed eight-region capture path is the page itself; it refuses the centered health-app hero and generic feature-card grid.
+THESIS: Open straight into a focused scan workspace, with a separate guided sample journey for recording.
 OWN-WORLD: Porcelain paper, graphite type, mineral teal actions, fine rules, instrument-like controls, and amber only for attention.
 STORY: Consent leads to consistent capture, honest observation review, and sharing the user controls.
-FIRST VIEWPORT: A numbered rail anchors the left, direct promise and phone capture occupy the center, and the eight-region guide resolves the right. The main action sits beside the promise.
-FORM: Guided-scan editorial field, selected direction B, asymmetric stage with responsive stacked chapters; approved visual seed is the stored public direction comp.
+FIRST VIEWPORT: Compact brand bar, clear scan action, optional sample tour, and four familiar destinations. No marketing detour.
+FORM: Calm task surfaces, generous photo area, fixed reachable navigation, and responsive single-column controls.
 -->`;
 
 export default async function RootLayout({
