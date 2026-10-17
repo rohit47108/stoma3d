@@ -1,0 +1,342 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-17T15:33:14Z",
+  "title": "Design System: Stoma3D",
+  "extensions": {
+    "colorMeta": {
+      "porcelain": {
+        "role": "neutral",
+        "displayName": "Porcelain",
+        "tonalRamp": [
+          "oklch(15% 0.005 155)",
+          "oklch(27% 0.005 155)",
+          "oklch(38% 0.005 155)",
+          "oklch(50% 0.005 155)",
+          "oklch(61% 0.005 155)",
+          "oklch(73% 0.005 155)",
+          "oklch(84% 0.005 155)",
+          "oklch(95% 0.005 155)"
+        ]
+      },
+      "scan-porcelain": {
+        "role": "neutral",
+        "displayName": "Scan Porcelain",
+        "tonalRamp": [
+          "oklch(15% 0.004 145)",
+          "oklch(27% 0.004 145)",
+          "oklch(38% 0.004 145)",
+          "oklch(50% 0.004 145)",
+          "oklch(61% 0.004 145)",
+          "oklch(73% 0.004 145)",
+          "oklch(84% 0.004 145)",
+          "oklch(95% 0.004 145)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "White Paper",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(27% 0 0)",
+          "oklch(38% 0 0)",
+          "oklch(50% 0 0)",
+          "oklch(61% 0 0)",
+          "oklch(73% 0 0)",
+          "oklch(84% 0 0)",
+          "oklch(95% 0 0)"
+        ]
+      },
+      "paper-soft": {
+        "role": "neutral",
+        "displayName": "Mineral Paper",
+        "tonalRamp": [
+          "oklch(15% 0.01 165)",
+          "oklch(27% 0.01 165)",
+          "oklch(38% 0.01 165)",
+          "oklch(50% 0.01 165)",
+          "oklch(61% 0.01 165)",
+          "oklch(73% 0.01 165)",
+          "oklch(84% 0.01 165)",
+          "oklch(95% 0.01 165)"
+        ]
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite",
+        "tonalRamp": [
+          "oklch(15% 0.03 205)",
+          "oklch(27% 0.03 205)",
+          "oklch(38% 0.03 205)",
+          "oklch(50% 0.03 205)",
+          "oklch(61% 0.03 205)",
+          "oklch(73% 0.03 205)",
+          "oklch(84% 0.03 205)",
+          "oklch(95% 0.03 205)"
+        ]
+      },
+      "graphite-soft": {
+        "role": "neutral",
+        "displayName": "Soft Graphite",
+        "tonalRamp": [
+          "oklch(15% 0.025 205)",
+          "oklch(27% 0.025 205)",
+          "oklch(38% 0.025 205)",
+          "oklch(50% 0.025 205)",
+          "oklch(61% 0.025 205)",
+          "oklch(73% 0.025 205)",
+          "oklch(84% 0.025 205)",
+          "oklch(95% 0.025 205)"
+        ]
+      },
+      "teal": {
+        "role": "primary",
+        "displayName": "Mineral Teal",
+        "tonalRamp": [
+          "oklch(15% 0.075 185)",
+          "oklch(27% 0.075 185)",
+          "oklch(38% 0.075 185)",
+          "oklch(50% 0.075 185)",
+          "oklch(61% 0.075 185)",
+          "oklch(73% 0.075 185)",
+          "oklch(84% 0.075 185)",
+          "oklch(95% 0.075 185)"
+        ]
+      },
+      "teal-dark": {
+        "role": "primary",
+        "displayName": "Deep Mineral Teal",
+        "tonalRamp": [
+          "oklch(15% 0.06 185)",
+          "oklch(27% 0.06 185)",
+          "oklch(38% 0.06 185)",
+          "oklch(50% 0.06 185)",
+          "oklch(61% 0.06 185)",
+          "oklch(73% 0.06 185)",
+          "oklch(84% 0.06 185)",
+          "oklch(95% 0.06 185)"
+        ]
+      },
+      "teal-light": {
+        "role": "primary",
+        "displayName": "Pale Mineral Teal",
+        "tonalRamp": [
+          "oklch(15% 0.02 170)",
+          "oklch(27% 0.02 170)",
+          "oklch(38% 0.02 170)",
+          "oklch(50% 0.02 170)",
+          "oklch(61% 0.02 170)",
+          "oklch(73% 0.02 170)",
+          "oklch(84% 0.02 170)",
+          "oklch(95% 0.02 170)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Fine Rule",
+        "tonalRamp": [
+          "oklch(15% 0.018 170)",
+          "oklch(27% 0.018 170)",
+          "oklch(38% 0.018 170)",
+          "oklch(50% 0.018 170)",
+          "oklch(61% 0.018 170)",
+          "oklch(73% 0.018 170)",
+          "oklch(84% 0.018 170)",
+          "oklch(95% 0.018 170)"
+        ]
+      },
+      "amber": {
+        "role": "attention",
+        "displayName": "Amber Attention",
+        "tonalRamp": [
+          "oklch(15% 0.115 60)",
+          "oklch(27% 0.115 60)",
+          "oklch(38% 0.115 60)",
+          "oklch(50% 0.115 60)",
+          "oklch(61% 0.115 60)",
+          "oklch(73% 0.115 60)",
+          "oklch(84% 0.115 60)",
+          "oklch(95% 0.115 60)"
+        ]
+      },
+      "amber-soft": {
+        "role": "attention",
+        "displayName": "Pale Amber Attention",
+        "tonalRamp": [
+          "oklch(15% 0.035 80)",
+          "oklch(27% 0.035 80)",
+          "oklch(38% 0.035 80)",
+          "oklch(50% 0.035 80)",
+          "oklch(61% 0.035 80)",
+          "oklch(73% 0.035 80)",
+          "oklch(84% 0.035 80)",
+          "oklch(95% 0.035 80)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Compact Headline",
+        "purpose": "Demo headings; scan headings share the size range with local line-height and tracking adjustments."
+      },
+      "title": {
+        "displayName": "Section Title",
+        "purpose": "Review and report sections."
+      },
+      "body": {
+        "displayName": "System Body",
+        "purpose": "Instructions and reading copy; demo paragraphs use line-height 1.6."
+      },
+      "label": {
+        "displayName": "Control Label",
+        "purpose": "Small status and sample labels."
+      },
+      "eyebrow": {
+        "displayName": "Region Eyebrow",
+        "purpose": "Uppercase region and sample context."
+      }
+    },
+    "shadows": [
+      {
+        "name": "map-popup",
+        "value": "0 4px 16px rgb(20 45 49 / 12%)",
+        "purpose": "Anchored map-rotation controls, not ordinary content panels."
+      },
+      {
+        "name": "ambient",
+        "value": "0 22px 54px rgba(35, 77, 71, 0.13)",
+        "purpose": "Existing global artifact-surface elevation."
+      },
+      {
+        "name": "ambient-small",
+        "value": "0 9px 24px rgba(35, 77, 71, 0.11)",
+        "purpose": "Existing smaller global artifact elevation."
+      }
+    ],
+    "motion": [
+      {
+        "name": "scan-control",
+        "value": "160ms ease-out",
+        "purpose": "Scan button background and pressed-state transition; disabled in reduced motion."
+      },
+      {
+        "name": "demo-control",
+        "value": "120ms ease-out",
+        "purpose": "Demo control background transition only when no reduced motion is requested."
+      },
+      {
+        "name": "scan-pressed",
+        "value": "scale(0.985)",
+        "purpose": "Small scan button pressed response, not an entrance animation."
+      }
+    ],
+    "breakpoints": [
+      { "name": "scan-desktop", "value": "900px" },
+      { "name": "demo-compact", "value": "700px" },
+      { "name": "demo-region-wrap", "value": "430px" },
+      { "name": "scan-narrow", "value": "420px" }
+    ],
+    "notes": {
+      "tonalRamps": "Synthesized OKLCH preview ramps, not additional application color tokens. Source hex primitives remain normative in DESIGN.md.",
+      "appearance": "Global styles adapt to dark appearance; scan/demo explicitly use the light shell palette."
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The main scan or next-step action.",
+      "html": "<button class=\"ds-primary\">Next <span aria-hidden=\"true\">→</span></button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:20px;min-height:48px;padding:12px 20px;border:1px solid var(--teal,#096d67);border-radius:10px;background:var(--teal,#096d67);color:#fff;font:650 16px/1.55 ui-sans-serif,system-ui,sans-serif;cursor:pointer;transition:background 160ms ease-out,transform 160ms ease-out}.ds-primary:hover{background:var(--teal-dark,#075650)}.ds-primary:active{transform:scale(.985)}.ds-primary:focus-visible{outline:3px solid var(--amber,#a55710);outline-offset:4px}.ds-primary:disabled{opacity:.55;cursor:default;transform:none}@media(prefers-reduced-motion:reduce){.ds-primary{transition:none}}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Back or a supporting action without primary emphasis.",
+      "html": "<button class=\"ds-secondary\">Back</button>",
+      "css": ".ds-secondary{min-height:48px;padding:12px 20px;border:1px solid var(--line,#cddbd7);border-radius:10px;background:var(--paper,#fff);color:var(--graphite,#142d31);font:650 16px/1.55 ui-sans-serif,system-ui,sans-serif;cursor:pointer;transition:background 160ms ease-out,transform 160ms ease-out}.ds-secondary:hover{background:#edf3ef}.ds-secondary:active{transform:scale(.985)}.ds-secondary:focus-visible{outline:3px solid var(--amber,#a55710);outline-offset:4px}.ds-secondary:disabled{opacity:.55;cursor:default;transform:none}@media(prefers-reduced-motion:reduce){.ds-secondary{transition:none}}"
+    },
+    {
+      "name": "Text Action",
+      "kind": "button",
+      "refersTo": "button-text",
+      "description": "Sample entry, restart, skip, or a low-emphasis utility action.",
+      "html": "<button class=\"ds-text\">Restart</button>",
+      "css": ".ds-text{min-height:44px;padding:8px 0;border:0;background:transparent;color:var(--teal,#096d67);font:650 16px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left;text-decoration:underline;text-underline-offset:4px;cursor:pointer}.ds-text:hover{color:var(--teal-dark,#075650)}.ds-text:focus-visible{outline:3px solid var(--teal,#096d67);outline-offset:3px}.ds-text:disabled{opacity:.45;cursor:default}"
+    },
+    {
+      "name": "Region Select",
+      "kind": "input",
+      "refersTo": "select",
+      "description": "Native region choice with a clear label and reachable control.",
+      "html": "<label class=\"ds-field\">Mouth region<select><option>Left inner cheek</option><option>Right inner cheek</option></select></label>",
+      "css": ".ds-field{display:grid;gap:8px;color:var(--graphite,#142d31);font:600 16px/1.55 ui-sans-serif,system-ui,sans-serif}.ds-field select{width:100%;min-height:48px;padding:10px 36px 10px 12px;border:1px solid var(--line,#cddbd7);border-radius:8px;background:var(--paper,#fff);color:var(--graphite,#142d31);font:inherit}.ds-field select:focus-visible{outline:3px solid var(--amber,#a55710);outline-offset:3px}"
+    },
+    {
+      "name": "Scan Destinations",
+      "kind": "nav",
+      "description": "Four labeled destinations with a quiet selected state; preview omits fixed positioning.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Scan destinations\"><button aria-current=\"page\"><span>⌂</span>Home</button><button><span>◎</span>Scan</button><button><span>◇</span>3D Map</button><button><span>◷</span>History</button></nav>",
+      "css": ".ds-nav{display:grid;grid-template-columns:repeat(4,1fr);padding:8px;border-top:1px solid var(--line,#cddbd7);background:var(--paper,#fff);gap:4px}.ds-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;padding:4px;border:0;border-radius:8px;background:transparent;color:var(--graphite-soft,#50666a);font:600 13px/1.55 ui-sans-serif,system-ui,sans-serif;cursor:pointer}.ds-nav button span{font-size:25px;line-height:1.2}.ds-nav button[aria-current]{color:var(--teal,#096d67);background:#e5f0ec}.ds-nav button:focus-visible{outline:3px solid var(--amber,#a55710);outline-offset:2px}"
+    },
+    {
+      "name": "Sample Badge",
+      "kind": "chip",
+      "description": "Persistent provenance at the demo header and report, not a filter.",
+      "html": "<span class=\"ds-sample\">Sample demo</span>",
+      "css": ".ds-sample{display:inline-flex;align-items:center;border:1px solid #9fc9c0;background:#e8f3ef;color:var(--teal,#096d67);padding:6px 10px;border-radius:6px;font:650 13px/1.55 ui-sans-serif,system-ui,sans-serif;white-space:nowrap}"
+    },
+    {
+      "name": "Report Sheet",
+      "kind": "card",
+      "refersTo": "report-sheet",
+      "description": "A paper-like report with visible sample provenance.",
+      "html": "<section class=\"ds-report\"><header><h2>Observation report</h2><span>Sample</span></header><p>Synthetic artwork and prepared values.</p><p>This result is not a diagnosis.</p></section>",
+      "css": ".ds-report{background:var(--paper,#fff);color:var(--graphite,#142d31);border:1px solid var(--line,#cddbd7);border-radius:8px;padding:clamp(20px,4vw,40px);font:400 16px/1.6 ui-sans-serif,system-ui,sans-serif}.ds-report header{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line,#cddbd7);padding-bottom:20px;margin-bottom:24px}.ds-report h2{font-size:24px;letter-spacing:-.025em;line-height:1.25;margin:0}.ds-report header span{color:var(--teal,#096d67);font-size:13px;font-weight:650}.ds-report p{color:var(--graphite-soft,#50666a);font-size:13px}"
+    },
+    {
+      "name": "Eight-Region Progress",
+      "kind": "custom",
+      "description": "Direct access to each sample view, with a distinct current region.",
+      "html": "<nav class=\"ds-regions\" aria-label=\"Eight-region progress\"><button aria-current=\"step\" aria-label=\"View 1\">1</button><button aria-label=\"View 2\">2</button><button aria-label=\"View 3\">3</button><button aria-label=\"View 4\">4</button><button aria-label=\"View 5\">5</button><button aria-label=\"View 6\">6</button><button aria-label=\"View 7\">7</button><button aria-label=\"View 8\">8</button></nav>",
+      "css": ".ds-regions{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}.ds-regions button{width:100%;min-height:44px;padding:0;border:1px solid var(--line,#cddbd7);border-radius:7px;background:var(--paper,#fff);color:var(--graphite,#142d31);font:400 16px/1.55 ui-sans-serif,system-ui,sans-serif;cursor:pointer}.ds-regions button[aria-current]{background:var(--teal,#096d67);color:#fff;border-color:var(--teal,#096d67)}.ds-regions button:focus-visible{outline:3px solid var(--teal,#096d67);outline-offset:3px}@media(max-width:430px){.ds-regions{grid-template-columns:repeat(4,1fr);gap:8px}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Guided Scan Workspace",
+    "overview": "Porcelain paper, graphite type, mineral teal actions, fine rules, and instrument-like controls retain the established Stoma3D identity. The public root now opens the existing scan workspace directly; the retired marketing hero is not the reference for new screens. Task surfaces are calm and specific, with generous photo areas and short, readable instructions.\n\nThe separate, visibly labeled Sample demo uses the same visual language. Synthetic artwork and prepared observations explain the journey without posing as real patient records or live analysis. Authenticated patient and clinician workspaces remain denser operating surfaces: mineral paper sidebars, plain ledgers, and precise status language rather than smaller landing pages.",
+    "keyCharacteristics": [
+      "Porcelain and white surfaces, graphite text, restrained mineral teal.",
+      "Compact system-sans headings and instrument-like controls.",
+      "Fine rules and whitespace before decorative containers.",
+      "Photo-first review, reachable navigation, explicit sample provenance."
+    ],
+    "rules": [
+      {
+        "name": "The Purposeful Accent Rule",
+        "body": "Teal carries ordinary actions and selection; amber is reserved for attention, focus, pending review, or a required decision. Dedicated destructive controls use the existing muted red, not an additional brand accent.",
+        "section": "colors"
+      },
+      {
+        "name": "The Paper Before Lift Rule",
+        "body": "Use tone, spacing, and rules to establish hierarchy before adding elevation; preserve the limited depth of actual overlays and artifacts.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do preserve the porcelain, graphite, mineral teal, and system-sans identity.",
+      "Do open directly into the scan workspace and keep the sample tour visibly separate.",
+      "Do keep photos, focus indicators, text labels, and fixed controls readable at compact widths.",
+      "Do identify synthetic artwork, authored outlines, and prepared values wherever they appear.",
+      "Do preserve the dense, quiet authenticated ledgers and honest empty/error states."
+    ],
+    "donts": [
+      "Don't restore the retired marketing hero or use it as the default page template.",
+      "Don't introduce decorative medical color coding, gradients, or general glass surfaces.",
+      "Don't mix sample observations into saved real scans or replace a failed result with examples.",
+      "Don't label the generic map a digital twin or imply clinical validity through visual polish.",
+      "Don't repeat the non-diagnostic warning on every capture or navigation screen."
+    ]
+  }
+}

@@ -44,10 +44,10 @@ async function recordCount(page) {
 }
 
 async function checkLayout(page) {
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
   const layout = await page.evaluate(() => ({
     width: innerWidth,
     scrollWidth: document.documentElement.scrollWidth,
-    headingFocused: document.activeElement?.tagName === "H1",
     actions: [
       ...document.querySelectorAll(".demo-controls-actions button"),
     ].map((button) => {
@@ -59,7 +59,6 @@ async function checkLayout(page) {
     layout.scrollWidth <= layout.width + 1,
     "No horizontal page overflow",
   );
-  assert.ok(layout.headingFocused, "Step heading receives focus");
   for (const box of layout.actions) {
     assert.ok(
       box.width >= 44 && box.height >= 44,
@@ -76,7 +75,9 @@ async function checkLayout(page) {
       headless: true,
     });
     try {
-      for (const width of [390, 1440]) {
+      for (const width of (process.env.STOMA_DEMO_WIDTHS || "390,1440")
+        .split(",")
+        .map(Number)) {
         const context = await browser.newContext({
           viewport: { width, height: 900 },
           reducedMotion: "reduce",
@@ -94,6 +95,9 @@ async function checkLayout(page) {
           page.getByRole("button", { name: "Start scan", exact: true }),
         ).toBeVisible();
         assert.equal(new URL(page.url()).pathname, "/");
+        await page.screenshot({
+          path: path.join(output, `${engineName}-${width}-home.png`),
+        });
         const before = await recordCount(page);
         await page
           .getByRole("button", { name: "Try guided demo", exact: true })
@@ -302,8 +306,9 @@ async function checkLayout(page) {
           before,
           "Sample tour never adds real scan records",
         );
+        const sampleAnalysisRequests = requests.length;
         assert.equal(
-          requests.length,
+          sampleAnalysisRequests,
           0,
           "Sample tour never calls analysis or model-card relay",
         );
@@ -417,7 +422,8 @@ async function checkLayout(page) {
           engine: engineName,
           width,
           rendered3d,
-          requests: requests.length,
+          sampleAnalysisRequests,
+          controlledLiveRequests: requests.length - sampleAnalysisRequests,
           errors,
           passed: true,
         });
