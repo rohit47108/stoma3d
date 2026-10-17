@@ -31,6 +31,9 @@ EXPECTED_FIXTURE_IMAGE_SHA256 = (
 # Exact, deliberately reviewed repository assets. Any content change requires a new
 # checksum in the inventory and this allowlist; silently accepting drift is forbidden.
 AUDITED_FILE_SHA256 = {
+    "apps/web/public/samples/mouth-regions-v1.png": (
+        "a0b79f5d96ff43833157b030b9f66917008bfa460c8b622032dfeefdf1d4e118"
+    ),
     ".impeccable/mocks/public-direction-a-editorial-lightbox.png": (
         "db7842485de8316ddb643f6ad84abd176c1d3a28d50da6a624f1b3a8342fc048"
     ),
@@ -92,6 +95,7 @@ AUDITED_TEXT_FILES = {
 }
 
 AUDITED_FILE_LICENSE = {
+    "apps/web/public/samples/mouth-regions-v1.png": "OpenAI generated output",
     ".impeccable/mocks/public-direction-a-editorial-lightbox.png": "CC0-1.0",
     ".impeccable/mocks/public-direction-b-guided-scan.png": "CC0-1.0",
     ".impeccable/mocks/public-direction-c-observation-archive.png": "CC0-1.0",

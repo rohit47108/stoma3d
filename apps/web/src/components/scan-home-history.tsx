@@ -19,7 +19,12 @@ export function ScanHome({
   onOpen,
   onStart,
   onMap,
-}: SharedProps & { session: GuestSession | null; onMap: () => void }) {
+  onDemo,
+}: SharedProps & {
+  session: GuestSession | null;
+  onMap: () => void;
+  onDemo?: () => void;
+}) {
   const recent = sessions.find((item) => item.captures.length > 0);
   const recentCapture = recent?.captures.at(-1);
   return (
@@ -38,6 +43,11 @@ export function ScanHome({
           : "Start scan"}
         <span aria-hidden="true">→</span>
       </button>
+      {onDemo && (
+        <button type="button" className="scan-button" onClick={onDemo}>
+          Try guided demo <span aria-hidden="true">→</span>
+        </button>
+      )}
       {session && (
         <div className="scan-home-progress">
           <span>{session.captures.length} of 8 regions captured</span>

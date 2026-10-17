@@ -45,9 +45,10 @@ itself as a diagnostic product.
 ## Capabilities and Constraints
 
 - The canonical mouth regions are `dorsal_tongue`, `ventral_tongue`, `left_buccal_mucosa`, `right_buccal_mucosa`, `upper_lip`, `lower_lip`, `upper_dental_arch`, and `lower_dental_arch`.
-- The product is non-diagnostic. Every screen and report states: "This result is not a diagnosis."
+- The product is non-diagnostic. Consent, results, and reports state: "This result is not a diagnosis." Avoid repeating that sentence on every navigation or capture screen.
 - A scan is complete after one quality-accepted, user-confirmed image is protected for every region. Model analysis may abstain without fabricating a result.
 - Normal use must not rely on bundled images, synthetic coverage records, hard-coded scores, or fixture fallbacks.
+- A separate, visibly labeled website sample tour may use synthetic artwork and prepared observations. It must not call inference, write real scan records, or replace a failed live result. Its comparison may illustrate authored outlines only when that provenance is stated.
 - The observation map is generic and versioned. A generated private observation surface
   may contain projected colors and confirmed pins, but never claims reconstructed
   patient anatomy or a digital twin.

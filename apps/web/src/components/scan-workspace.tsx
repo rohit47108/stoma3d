@@ -46,7 +46,7 @@ const destinations: { id: Destination; label: string; symbol: string }[] = [
   { id: "history", label: "History", symbol: "◷" },
 ];
 
-export function ScanWorkspace() {
+export function ScanWorkspace({ onDemo }: { onDemo?: () => void } = {}) {
   const [destination, setDestination] = useState<Destination>("home");
   const [stage, setStage] = useState<ScanStage>("intake");
   const [sessions, setSessions] = useState<GuestSession[]>([]);
@@ -491,6 +491,7 @@ export function ScanWorkspace() {
                 </div>
                 {destination === "home" && (
                   <ScanHome
+                    onDemo={onDemo}
                     sessions={sessions}
                     session={session}
                     onOpen={openCapture}
